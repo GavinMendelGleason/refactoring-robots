@@ -287,10 +287,17 @@ def _verify_function(source: str, func_name: str, hint: str | None = None) -> Go
                             proof_method=method)
 
         error = result.stderr + result.stdout
+        # Check for SMT counterexample in the generated source
+        ce_hint = ""
+        if "SMT counterexample:" in coq_source:
+            import re
+            m = re.search(r'SMT counterexample: (.*?) \*', coq_source)
+            if m:
+                ce_hint = f"\n\nSMT counterexample found: {m.group(1)}\nStrengthen the loop invariant to rule out these values."
         return GoalStatus(name=func_name,
                         goal_statement=f"wp {func_name}_body ...",
                         level=ProofLevel.UNPROVED,
-                        error_detail=error[-800:],
+                        error_detail=error[-800:] + ce_hint,
                         suggested_action=Action.RETRY_LLM,
                         suggestion_text=error[:200],
                         proof_method="wp_reduce")
@@ -700,22 +707,16 @@ def _try_smt_vcg(inv_coq: str, exit_cond: str, post_vcg: str, scaffold: str) -> 
     return result.is_valid
 
 
-def _try_smt_vcg_ir(inv_irs: list, exit_cond: str, post_irs: list, scaffold: str = "") -> bool:
+def _try_smt_vcg_ir(inv_irs: list, exit_cond: str, post_irs: list, scaffold: str = "", return_model: bool = False):
     """Try to prove the VCG using SMT, generating SMT-LIB directly from IR nodes.
 
-    Args:
-        inv_irs: List of Expr IR nodes for invariant assertions.
-        exit_cond: Coq exit condition string (e.g. "Z.leb (i+1) n = false").
-        post_irs: List of Expr IR nodes for postcondition assertions.
-        scaffold: Optional result scaffolding (e.g. "result = xs__len").
-
-    Returns True if the SMT solver proves the VCG (UNSAT).
+    Returns SmtResult. The caller checks .is_valid.
     """
-    if not inv_irs or not post_irs:
-        return False
-
     from .contract_ir import Logical
-    from .smt_export import _expr_to_smt, _extract_vars
+    from .smt_export import _expr_to_smt, _extract_vars, SmtResult
+
+    if not inv_irs or not post_irs:
+        return SmtResult(is_valid=False, error="No IR nodes")
 
     inv = Logical("and", list(inv_irs)) if len(inv_irs) > 1 else inv_irs[0]
     post = Logical("and", list(post_irs)) if len(post_irs) > 1 else post_irs[0]
@@ -725,7 +726,7 @@ def _try_smt_vcg_ir(inv_irs: list, exit_cond: str, post_irs: list, scaffold: str
     post_smt = post.to_smt()
 
     if not inv_smt or not exit_smt or not post_smt:
-        return False
+        return SmtResult(is_valid=False, error="Expression conversion failed")
 
     # Include scaffold in variable extraction and as an assertion
     scaffold_stripped = scaffold.strip().rstrip("->").strip() if scaffold else ""
@@ -748,6 +749,7 @@ def _try_smt_vcg_ir(inv_irs: list, exit_cond: str, post_irs: list, scaffold: str
         lines.append(f"(assert {scaff_smt})")
     lines.append(f"(assert (not {post_smt}))")
     lines.append("(check-sat)")
+    lines.append("(get-model)")
 
     import subprocess
     import tempfile
@@ -768,9 +770,10 @@ def _try_smt_vcg_ir(inv_irs: list, exit_cond: str, post_irs: list, scaffold: str
             capture_output=True, text=True, timeout=10,
             env={**os.environ},
         )
-        return "unsat" in result.stdout
-    except Exception:
-        return False
+        from .smt_export import _parse_smt_output
+        return _parse_smt_output(result.stdout + result.stderr, "cvc4")
+    except Exception as e:
+        return SmtResult(is_valid=False, error=str(e)[:200])
     finally:
         if tmp_path and tmp_path.exists():
             tmp_path.unlink(missing_ok=True)
@@ -830,14 +833,25 @@ def _generate_coq(func_node, lint_results, imp_body: str, full_tree=None, hint: 
         # Try SMT first (Level 2) for the VCG — use IR for clean SMT-LIB generation
         inv_irs = [r.lint_result.ir for r in invs if r.lint_result.ir]
         post_irs = [r.lint_result.ir for r in posts if r.lint_result.ir]
-        smt_proved = _try_smt_vcg_ir(inv_irs, exit_cond, post_irs, result_scaffold)
+        smt_result = _try_smt_vcg_ir(inv_irs, exit_cond, post_irs, result_scaffold)
 
-        if smt_proved:
+        if smt_result.is_valid:
+            vcg_section = f"""
+(* Verification condition proved by SMT (cvc4) *)
+(* {inv_coq} -> {exit_cond} -> {post_vcg} *)
+"""
+        if smt_result.is_valid:
             vcg_section = f"""
 (* Verification condition proved by SMT (cvc4) *)
 (* {inv_coq} -> {exit_cond} -> {post_vcg} *)
 """
         else:
+            # SMT couldn't prove it — generate Coq VCG (may fail via lia/LLM)
+            # If SMT found a counterexample, annotate the generated Coq
+            ce_note = ""
+            if smt_result.counterexample:
+                ce_str = ", ".join(f"{k}={v}" for k, v in smt_result.counterexample.items())
+                ce_note = f" (* SMT counterexample: {ce_str} — strengthen invariant to rule this out *)"
             import re
             all_vcg_vars = set()
             for expr in [inv_coq, post_vcg]:
@@ -850,8 +864,7 @@ def _generate_coq(func_node, lint_results, imp_body: str, full_tree=None, hint: 
             vcg_params = " ".join(f"({v} : Z)" for v in sorted(all_vcg_vars))
             n_params = len(all_vcg_vars)
             intros_pat = " ".join(["?"] * n_params) + " Hinv Hexit" if n_params > 0 else "Hinv Hexit"
-            vcg_section = f"""
-(* Verification condition: invariant + exit → postcondition *)
+            vcg_section = f"""(* Verification condition: invariant + exit → postcondition{ce_note} *)
 Theorem {name}_vcg_exit : forall {vcg_params},
   ({inv_coq}) ->
   {exit_cond} ->

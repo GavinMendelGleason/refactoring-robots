@@ -44,11 +44,12 @@ class GoalStatus:
     goal_statement: str
     level: ProofLevel = ProofLevel.UNPROVED
     elapsed_ms: float = 0.0
-    error_detail: str = ""
-    suggested_action: Action = Action.OK
-    suggestion_text: str = ""
     dependencies: list[str] = field(default_factory=list)
+    counterexample: dict[str, int] = field(default_factory=dict)
     proof_method: str = ""
+    error_detail: str = ""
+    suggested_action: "Action | None" = None
+    suggestion_text: str = ""
 
     def is_proved(self) -> bool:
         return self.level != ProofLevel.UNPROVED
