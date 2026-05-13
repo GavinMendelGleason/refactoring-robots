@@ -626,6 +626,22 @@ def _py_expr_to_coq_var(node: ast.expr) -> str:
     return "?"
 
 
+def _try_smt_vcg(inv_coq: str, exit_cond: str, post_vcg: str, scaffold: str) -> bool:
+    """Try to prove the VCG using an SMT solver.
+
+    Returns True if the SMT solver proves the VCG (UNSAT).
+    """
+    from py.oracle.smt_export import verify_vcg
+    result = verify_vcg(
+        invariant=inv_coq,
+        exit_cond=exit_cond,
+        postcondition=post_vcg,
+        scaffold=scaffold.strip().rstrip('->').strip() if scaffold else "",
+        solver="cvc4",
+    )
+    return result.is_valid
+
+
 def _generate_coq(func_node, lint_results, imp_body: str, full_tree=None, hint: str | None = None) -> str:
     """Generate Coq theorem file for a function."""
     import ast
@@ -674,23 +690,31 @@ def _generate_coq(func_node, lint_results, imp_body: str, full_tree=None, hint: 
             _unscope_vars(r.lint_result.coq_translation)
             for r in posts if r.lint_result.coq_translation
         ) or "True"
-        # Collect all variable names from unscoped expressions
-        import re
-        all_vcg_vars = set()
-        for expr in [inv_coq, post_vcg]:
-            for vname in re.findall(r'\b([a-zA-Z_][a-zA-Z0-9_]*)\b', expr):
-                if vname not in {'True', 'False', 'Z', 'string', 'and', 'or', 'not', 'fun', 's', 'parray_key'}:
-                    all_vcg_vars.add(vname)
-        # Always include 'result' and loop variables in scope for VCG
-        all_vcg_vars.add("result")
-        for vname in ["i", "n"]:
-            all_vcg_vars.add(vname)
-        vcg_params = " ".join(f"({v} : Z)" for v in sorted(all_vcg_vars))
-        n_params = len(all_vcg_vars)
-        intros_pat = " ".join(["?"] * n_params) + " Hinv Hexit" if n_params > 0 else "Hinv Hexit"
         exit_cond = _vcg_exit_condition(func_node)
         result_scaffold = _vcg_result_scaffold(imp_body)
-        vcg_section = f"""
+
+        # Try SMT first (Level 2) for the VCG — it's a decidable Z arithmetic fragment
+        smt_proved = _try_smt_vcg(inv_coq, exit_cond, post_vcg, result_scaffold)
+
+        if smt_proved:
+            vcg_section = f"""
+(* Verification condition proved by SMT (cvc4) *)
+(* {inv_coq} -> {exit_cond} -> {post_vcg} *)
+"""
+        else:
+            import re
+            all_vcg_vars = set()
+            for expr in [inv_coq, post_vcg]:
+                for vname in re.findall(r'\b([a-zA-Z_][a-zA-Z0-9_]*)\b', expr):
+                    if vname not in {'True', 'False', 'Z', 'string', 'and', 'or', 'not', 'fun', 's', 'parray_key'}:
+                        all_vcg_vars.add(vname)
+            all_vcg_vars.add("result")
+            for vname in ["i", "n"]:
+                all_vcg_vars.add(vname)
+            vcg_params = " ".join(f"({v} : Z)" for v in sorted(all_vcg_vars))
+            n_params = len(all_vcg_vars)
+            intros_pat = " ".join(["?"] * n_params) + " Hinv Hexit" if n_params > 0 else "Hinv Hexit"
+            vcg_section = f"""
 (* Verification condition: invariant + exit → postcondition *)
 Theorem {name}_vcg_exit : forall {vcg_params},
   ({inv_coq}) ->
@@ -701,7 +725,6 @@ Proof.
   intros {intros_pat} Hres.
   apply Z.leb_gt in Hexit.
   repeat (match goal with [H: _ /\\ _ |- _] => destruct H end).
-  (* If lia fails, Level 3 (LLM oracle) handles the division/non-linear case *)
   lia.
 Qed.
 """
