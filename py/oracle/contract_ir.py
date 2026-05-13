@@ -119,7 +119,7 @@ class IndexExpr(Expr):
 
 def formula_to_smt(invariant: Expr, exit_cond: Expr, postcondition: Expr, scaffold: Expr | None = None) -> str:
     """Generate an SMT-LIB file from the IR and return (source, variables)."""
-    from py.oracle.smt_export import _extract_vars
+    from .smt_export import _extract_vars
 
     # Collect vars from all sub-expressions
     inv_str = invariant.to_coq(scoped=False)

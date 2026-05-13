@@ -189,7 +189,7 @@ def validate_with_coqpyt(
     Returns:
         (True, "") or (False, error_message).
     """
-    from py.oracle.coqpyt_session import CoqpytSession
+    from .coqpyt_session import CoqpytSession
     import sys as _sys
 
     proof_text = proof_script.strip()

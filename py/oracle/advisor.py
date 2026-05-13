@@ -14,7 +14,7 @@ the templated heuristics aren't sufficient.
 from dataclasses import dataclass, field
 from typing import Optional
 
-from py.oracle.client import load_config, call_llm
+from .client import load_config, call_llm
 
 
 import ast

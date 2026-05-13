@@ -23,7 +23,7 @@ from typing import Any
 
 import ast
 
-from py.oracle.advisor import (
+from .advisor import (
     analyze_function,
     analyze_file,
     generate_llm_guidance,
@@ -31,9 +31,9 @@ from py.oracle.advisor import (
     FunctionAnalysis,
     FileAnalysis,
 )
-from py.oracle.contract_linter import ContractLinter, AssertInfo
-from py.oracle.python_to_imp import python_to_imp
-from py.oracle.reporting import (
+from .contract_linter import ContractLinter, AssertInfo
+from .python_to_imp import python_to_imp
+from .reporting import (
     Action, GoalStatus, ProofLevel, PipelineReport,
     build_report, action_guidance,
 )
@@ -304,7 +304,7 @@ def _try_llm_oracle(source: str, func_name: str, goal: GoalStatus) -> GoalStatus
     if not goal or goal.is_proved():
         return goal
 
-    from py.oracle.client import oracle_query, load_config
+    from .client import oracle_query, load_config
     import sys as _sys
 
     config = load_config()
@@ -631,7 +631,7 @@ def _try_smt_vcg(inv_coq: str, exit_cond: str, post_vcg: str, scaffold: str) -> 
 
     Returns True if the SMT solver proves the VCG (UNSAT).
     """
-    from py.oracle.smt_export import verify_vcg
+    from .smt_export import verify_vcg
     result = verify_vcg(
         invariant=inv_coq,
         exit_cond=exit_cond,
@@ -656,8 +656,8 @@ def _try_smt_vcg_ir(inv_irs: list, exit_cond: str, post_irs: list, scaffold: str
     if not inv_irs or not post_irs:
         return False
 
-    from py.oracle.contract_ir import Logical
-    from py.oracle.smt_export import _expr_to_smt, _extract_vars
+    from .contract_ir import Logical
+    from .smt_export import _expr_to_smt, _extract_vars
 
     inv = Logical("and", list(inv_irs)) if len(inv_irs) > 1 else inv_irs[0]
     post = Logical("and", list(post_irs)) if len(post_irs) > 1 else post_irs[0]

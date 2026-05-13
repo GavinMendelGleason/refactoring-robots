@@ -17,7 +17,7 @@ import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from py.oracle.client import OracleResult, oracle_query
+from .client import OracleResult, oracle_query
 
 
 @dataclass

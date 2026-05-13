@@ -25,7 +25,7 @@ eval $(opam env)
 dune build
 
 # Python side (when present)
-cd py && python -m pytest
+eval $(opam env); PYTHONPATH=py .venv/bin/python -m pytest py/tests/ -v
 
 # Web server (needs libssl-dev, libev-dev, then `opam install dream`)
 dune exec server/server.exe

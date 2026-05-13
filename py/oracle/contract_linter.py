@@ -13,7 +13,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Optional
 
-from py.oracle.contract_ir import (
+from .contract_ir import (
     Expr, Var, IntLit, BoolLit, BinOp, Logical, LenExpr, IndexExpr,
 )
 

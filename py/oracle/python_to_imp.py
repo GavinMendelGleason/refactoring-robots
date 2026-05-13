@@ -444,8 +444,8 @@ class InvariantFinder(ast.NodeVisitor):
         inv_parts = []
         for stmt in body:
             if isinstance(stmt, ast.Assert):
-                linter = __import__("py.oracle.contract_linter", fromlist=["ContractLinter"])
-                lint = linter.ContractLinter()
+                from oracle.contract_linter import ContractLinter
+                lint = ContractLinter()
                 result = lint.lint_expression(stmt.test)
                 if result.is_valid:
                     inv_parts.append(result.coq_translation)
