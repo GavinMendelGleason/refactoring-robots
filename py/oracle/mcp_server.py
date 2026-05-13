@@ -427,10 +427,13 @@ def _expand_params(tree, params, func_node: ast.FunctionDef | None = None):
 
     # Build a map of param name → Coq type from function annotations
     param_types: dict[str, str] = {}
+    list_params: set[str] = set()
     if func_node:
         for arg in func_node.args.args:
             coq_type = _py_type_to_coq(arg.annotation)
             param_types[arg.arg] = coq_type
+            if _is_list_param(arg.annotation):
+                list_params.add(arg.arg)
 
     class_fields = {}
     record_section = ""
@@ -450,7 +453,14 @@ def _expand_params(tree, params, func_node: ast.FunctionDef | None = None):
     for p in params:
         coq_type = param_types.get(p, "Z")
         cls_name = next((c for c in class_fields if c.lower() == p.lower()), None)
-        if cls_name:
+        if p in list_params:
+            # List parameters: expose the length as a Coq parameter,
+            # initialize the _len key in the state. Elements are opaque.
+            len_var = f"{p}__len"
+            expanded.append(len_var)
+            parts.append(f"({len_var} : Z)")
+            init_state = f'(upd {init_state} "{p}._len"%string {len_var})'
+        elif cls_name:
             for f in class_fields[cls_name]:
                 expanded.append(f"{p}_{f}")
                 parts.append(f"({p}_{f} : Z)")
@@ -475,7 +485,21 @@ def _py_type_to_coq(annotation) -> str:
     type_map = {"int": "Z", "float": "Z", "bool": "bool", "str": "string"}
     if isinstance(annotation, ast.Name):
         return type_map.get(annotation.id, "Z")
+    if isinstance(annotation, ast.Subscript):
+        # list[int], list[Item], etc.
+        if isinstance(annotation.value, ast.Name) and annotation.value.id == "list":
+            return "list"
     return "Z"
+
+
+def _is_list_param(annotation) -> bool:
+    """Check if a type annotation is a list type."""
+    if annotation is None:
+        return False
+    if isinstance(annotation, ast.Subscript):
+        if isinstance(annotation.value, ast.Name) and annotation.value.id == "list":
+            return True
+    return False
 
 
 def _generate_record(node) -> str:
