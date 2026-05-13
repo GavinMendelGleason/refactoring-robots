@@ -627,7 +627,7 @@ def _py_expr_to_coq_var(node: ast.expr) -> str:
 
 
 def _try_smt_vcg(inv_coq: str, exit_cond: str, post_vcg: str, scaffold: str) -> bool:
-    """Try to prove the VCG using an SMT solver.
+    """Try to prove the VCG using an SMT solver. (Legacy — uses regex parser.)
 
     Returns True if the SMT solver proves the VCG (UNSAT).
     """
@@ -640,6 +640,82 @@ def _try_smt_vcg(inv_coq: str, exit_cond: str, post_vcg: str, scaffold: str) -> 
         solver="cvc4",
     )
     return result.is_valid
+
+
+def _try_smt_vcg_ir(inv_irs: list, exit_cond: str, post_irs: list, scaffold: str = "") -> bool:
+    """Try to prove the VCG using SMT, generating SMT-LIB directly from IR nodes.
+
+    Args:
+        inv_irs: List of Expr IR nodes for invariant assertions.
+        exit_cond: Coq exit condition string (e.g. "Z.leb (i+1) n = false").
+        post_irs: List of Expr IR nodes for postcondition assertions.
+        scaffold: Optional result scaffolding (e.g. "result = xs__len").
+
+    Returns True if the SMT solver proves the VCG (UNSAT).
+    """
+    if not inv_irs or not post_irs:
+        return False
+
+    from py.oracle.contract_ir import Logical
+    from py.oracle.smt_export import _expr_to_smt, _extract_vars
+
+    inv = Logical("and", list(inv_irs)) if len(inv_irs) > 1 else inv_irs[0]
+    post = Logical("and", list(post_irs)) if len(post_irs) > 1 else post_irs[0]
+    exit_smt = _expr_to_smt(exit_cond)
+
+    inv_smt = inv.to_smt()
+    post_smt = post.to_smt()
+
+    if not inv_smt or not exit_smt or not post_smt:
+        return False
+
+    # Include scaffold in variable extraction and as an assertion
+    scaffold_stripped = scaffold.strip().rstrip("->").strip() if scaffold else ""
+    scaff_smt = _expr_to_smt(scaffold_stripped) if scaffold_stripped else ""
+    all_vars_coq = inv.to_coq(False) + " " + exit_cond + " " + post.to_coq(False)
+    if scaffold_stripped:
+        all_vars_coq += " " + scaffold_stripped
+    vars_set = _extract_vars(all_vars_coq)
+
+    lines = [
+        "(set-logic QF_NIA)",
+        "(set-option :produce-models true)",
+    ]
+    for v in sorted(vars_set):
+        lines.append(f"(declare-fun {v} () Int)")
+
+    lines.append(f"(assert {inv_smt})")
+    lines.append(f"(assert {exit_smt})")
+    if scaff_smt:
+        lines.append(f"(assert {scaff_smt})")
+    lines.append(f"(assert (not {post_smt}))")
+    lines.append("(check-sat)")
+
+    import subprocess
+    import tempfile
+    import os
+    from pathlib import Path
+
+    smt_src = "\n".join(lines)
+    tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".smt2", delete=False, prefix="vcg_ir_"
+        ) as f:
+            f.write(smt_src)
+            tmp_path = Path(f.name)
+
+        result = subprocess.run(
+            ["cvc4", str(tmp_path)],
+            capture_output=True, text=True, timeout=10,
+            env={**os.environ},
+        )
+        return "unsat" in result.stdout
+    except Exception:
+        return False
+    finally:
+        if tmp_path and tmp_path.exists():
+            tmp_path.unlink(missing_ok=True)
 
 
 def _generate_coq(func_node, lint_results, imp_body: str, full_tree=None, hint: str | None = None) -> str:
@@ -693,8 +769,10 @@ def _generate_coq(func_node, lint_results, imp_body: str, full_tree=None, hint: 
         exit_cond = _vcg_exit_condition(func_node)
         result_scaffold = _vcg_result_scaffold(imp_body)
 
-        # Try SMT first (Level 2) for the VCG — it's a decidable Z arithmetic fragment
-        smt_proved = _try_smt_vcg(inv_coq, exit_cond, post_vcg, result_scaffold)
+        # Try SMT first (Level 2) for the VCG — use IR for clean SMT-LIB generation
+        inv_irs = [r.lint_result.ir for r in invs if r.lint_result.ir]
+        post_irs = [r.lint_result.ir for r in posts if r.lint_result.ir]
+        smt_proved = _try_smt_vcg_ir(inv_irs, exit_cond, post_irs, result_scaffold)
 
         if smt_proved:
             vcg_section = f"""
