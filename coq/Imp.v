@@ -61,7 +61,8 @@ Inductive aexp : Type :=
   | ADiv (a1 a2 : aexp)
   | ALen (name : var)
   | AIndex (name : var) (idx : aexp)
-  | ADictLen (name : var) (key_e : aexp).
+  | ADictLen (name : var) (key_e : aexp)
+  | ADictCount (name : var).
 
 (** Convert Z to string for array key encoding. *)
 Fixpoint pos_to_string (p : positive) : string :=
@@ -87,6 +88,9 @@ Definition parray_len_key (name : var) : var :=
 Definition dict_key (name : var) (key : Z) : var :=
   (name ++ ".v." ++ z_to_string key)%string.
 
+Definition dict_count_key (name : var) : var :=
+  (name ++ "._count")%string.
+
 (** Evaluation of arithmetic expressions. *)
 Fixpoint aeval (a : aexp) (s : state) : Z :=
   match a with
@@ -100,6 +104,7 @@ Fixpoint aeval (a : aexp) (s : state) : Z :=
   | ALen name => s (parray_len_key name)
   | AIndex name idx_e => s (parray_key name (aeval idx_e s))
   | ADictLen name key_e => s (parray_len_key (dict_key name (aeval key_e s)))
+  | ADictCount name => s (dict_count_key name)
   end.
 
 (** ** Boolean Expressions *)
@@ -179,16 +184,22 @@ Inductive ceval : com -> state -> state -> Prop :=
       ceval (CListSet name idx_e val_e) s
             (upd s (parray_key name (aeval idx_e s)) (aeval val_e s))
   | E_DictSet : forall name key_e val_e s,
+      let dk := dict_key name (aeval key_e s) in
+      let is_new := Z.eqb 0 (s (parray_len_key dk)) in
       ceval (CDictSet name key_e val_e) s
-            (upd (upd s (dict_key name (aeval key_e s)) (aeval val_e s))
-                 (parray_len_key (dict_key name (aeval key_e s))) 1)
+            (upd (upd (upd s dk (aeval val_e s))
+                      (parray_len_key dk) 1)
+                 (dict_count_key name)
+                 (s (dict_count_key name) + (if is_new then 1 else 0)))
   | E_DictGet : forall name key_e target s,
       ceval (CDictGet name key_e target) s
             (upd s target (s (dict_key name (aeval key_e s))))
   | E_DictEnsureList : forall name key_e s,
       let dk := dict_key name (aeval key_e s) in
       ceval (CDictEnsureList name key_e) s
-            (upd s (parray_len_key dk) (s (parray_len_key dk)))
+            (if Z.eqb (s (parray_len_key dk)) 0
+             then upd s (parray_len_key dk) 0
+             else s)
   | E_DictAppend : forall name key_e val_e s,
       let dk := dict_key name (aeval key_e s) in
       ceval (CDictAppend name key_e val_e) s

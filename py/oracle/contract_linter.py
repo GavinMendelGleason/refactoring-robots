@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Optional
 
 from .contract_ir import (
-    Expr, Var, IntLit, BoolLit, BinOp, Logical, LenExpr, IndexExpr, DictLenExpr,
+    Expr, Var, IntLit, BoolLit, BinOp, Logical, LenExpr, IndexExpr, DictLenExpr, DictCountExpr,
 )
 
 
@@ -263,13 +263,19 @@ class ContractLinter(ast.NodeVisitor):
             args = [a for a in args if a]
             if not args:
                 return IntLit(0)
-            if name == "abs":
-                return args[0]  # approximate
-            # min/max are not directly representable
-            return args[0]
-        if name in ("int", "float", "bool", "range"):
-            if node.args:
-                return self.visit(node.args[0])
+        if name == "len":
+            if node.args and isinstance(node.args[0], ast.Name):
+                arg_name = node.args[0].id
+                if self._is_dict_name(arg_name):
+                    return DictCountExpr(arg_name)
+                return LenExpr(arg_name)
+            if node.args and isinstance(node.args[0], ast.Subscript):
+                sub = node.args[0]
+                if isinstance(sub.value, ast.Name):
+                    dname = sub.value.id
+                    key = self.visit(sub.slice) if isinstance(sub.slice, ast.expr) else IntLit(0)
+                    if key:
+                        return DictLenExpr(dname, key)
             return IntLit(0)
         if name == "isinstance":
             return BoolLit(True)

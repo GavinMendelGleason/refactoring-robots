@@ -34,13 +34,19 @@ Fixpoint wp (c : com) (Q : assertion) : assertion :=
   | CListSet name idx_e val_e =>
       fun s => Q (upd s (parray_key name (aeval idx_e s)) (aeval val_e s))
   | CDictSet name key_e val_e =>
-      fun s => Q (upd (upd s (dict_key name (aeval key_e s)) (aeval val_e s))
-                     (parray_len_key (dict_key name (aeval key_e s))) 1)
+      fun s => let dk := dict_key name (aeval key_e s) in
+               let is_new := Z.eqb 0 (s (parray_len_key dk)) in
+               Q (upd (upd (upd s dk (aeval val_e s))
+                           (parray_len_key dk) 1)
+                      (dict_count_key name)
+                      (s (dict_count_key name) + (if is_new then 1 else 0)))
   | CDictGet name key_e target =>
       fun s => Q (upd s target (s (dict_key name (aeval key_e s))))
   | CDictEnsureList name key_e =>
       fun s => let dk := dict_key name (aeval key_e s) in
-               Q (upd s (parray_len_key dk) (s (parray_len_key dk)))
+               Q (if Z.eqb (s (parray_len_key dk)) 0
+                  then upd s (parray_len_key dk) 0
+                  else s)
   | CDictAppend name key_e val_e =>
       fun s => let dk := dict_key name (aeval key_e s) in
                let len := s (parray_len_key dk) in

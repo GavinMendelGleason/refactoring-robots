@@ -132,6 +132,20 @@ class DictLenExpr(Expr):
         return f"{self.name}_v_{self.key.to_smt()}__len"
 
 
+@dataclass
+class DictCountExpr(Expr):
+    """len(dict) — number of keys in dict."""
+    name: str
+
+    def to_coq(self, scoped: bool = False) -> str:
+        if scoped:
+            return f's (dict_count_key "{self.name}"%string)%string'
+        return f"{self.name}__count"
+
+    def to_smt(self) -> str:
+        return f"{self.name}__count"
+
+
 def formula_to_smt(invariant: Expr, exit_cond: Expr, postcondition: Expr, scaffold: Expr | None = None) -> str:
     """Generate an SMT-LIB file from the IR and return (source, variables)."""
     from .smt_export import _extract_vars
