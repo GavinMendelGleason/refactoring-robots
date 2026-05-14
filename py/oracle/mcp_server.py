@@ -1084,12 +1084,16 @@ def handle_call_tool(params: dict) -> dict:
     name = params.get("name", "")
     args = params.get("arguments", {})
 
-    if name == "check-file":
-        result = tool_check_file(args)
-    elif name == "check-function":
-        result = tool_check_function(args)
-    else:
-        return {"content": [{"type": "text", "text": f"Unknown tool: {name}"}], "isError": True}
+    try:
+        if name == "check-file":
+            result = tool_check_file(args)
+        elif name == "check-function":
+            result = tool_check_function(args)
+        else:
+            return {"content": [{"type": "text", "text": f"Unknown tool: {name}"}], "isError": True}
+    except Exception as e:
+        import traceback
+        return {"content": [{"type": "text", "text": f"Error: {e}\n{traceback.format_exc()[-500:]}"}], "isError": True}
 
     return {"content": [{"type": "text", "text": result}]}
 
