@@ -52,6 +52,9 @@ Fixpoint wp (c : com) (Q : assertion) : assertion :=
                let len := s (parray_len_key dk) in
                Q (upd (upd s (parray_key dk len) (aeval val_e s))
                       (parray_len_key dk) (len + 1))
+  | CCall name args pre post target =>
+      fun s => pre s ->
+               (forall r, post (upd s target r) -> Q (upd s target r))
   end.
 
 (** ** WP Properties *)

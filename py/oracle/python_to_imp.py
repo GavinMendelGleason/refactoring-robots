@@ -24,13 +24,13 @@ import ast
 from typing import Optional
 
 
-def python_to_imp(func_node: ast.FunctionDef, invariants: dict[int, str] | None = None) -> str:
+def python_to_imp(func_node: ast.FunctionDef, invariants: dict[int, str] | None = None, contract_map: dict[str, tuple[list[str], str, str]] | None = None) -> str:
     """Translate a Python function to its IMP body commands.
 
     Args:
         func_node: The AST FunctionDef node.
         invariants: Optional pre-computed invariant map (loop_line → Coq string).
-                    If not provided, InvariantFinder is run on the function.
+        contract_map: Optional map of function_name → (pre_coq, post_coq) for CCall.
 
     Returns a Coq `com` expression string.
     """
@@ -41,6 +41,8 @@ def python_to_imp(func_node: ast.FunctionDef, invariants: dict[int, str] | None 
         finder = InvariantFinder()
         finder.visit(func_node)
         translator._invariants = finder.invariants
+    if contract_map is not None:
+        translator._contract_map = contract_map
     body = translator.translate_body(func_node.body)
     return body if body else "CSkip"
 
@@ -50,6 +52,7 @@ class ImpTranslator:
 
     def __init__(self):
         self._invariants: dict[int, str] = {}  # line → invariant string
+        self._contract_map: dict[str, tuple[list[str], str, str]] = {}  # name → (params, pre, post)
 
     def translate_body(self, body: list[ast.stmt]) -> str:
         """Translate a list of statements into a seq of IMP commands."""
@@ -196,7 +199,13 @@ class ImpTranslator:
             elif isinstance(value, ast.List):
                 return self._translate_list_literal(target, value)
             elif isinstance(value, ast.Dict) and not value.keys:
-                return "CSkip"  # x = {} — empty dict, no state change
+                return "CSkip"  # x = {} — empty dict
+            elif isinstance(value, ast.Call):
+                cc = self._translate_function_call(target, value)
+                if cc:
+                    return cc
+                val = self.translate_expr(value)
+                targets.append(f'(CAss "{target}"%string {val})')
             else:
                 val = self.translate_expr(value)
                 targets.append(f'(CAss "{target}"%string {val})')
@@ -205,6 +214,32 @@ class ImpTranslator:
         result = targets[-1]
         for cmd in reversed(targets[:-1]):
             result = f"(CSeq {cmd} {result})"
+        return result
+
+    def _translate_function_call(self, target: str, node: ast.Call) -> Optional[str]:
+        name = self._get_call_name(node)
+        if not name or name not in self._contract_map:
+            return None
+        callee_params, pre_coq, post_coq = self._contract_map[name]
+        args_str = " ".join(self.translate_expr(a) for a in node.args)
+        args_list = "(" + " :: ".join(self.translate_expr(a) for a in node.args) + " :: nil)" if node.args else "nil"
+        # Bind caller args to callee param slots in the state
+        bindings = []
+        for i, arg in enumerate(node.args):
+            arg_coq = self.translate_expr(arg)
+            if i < len(callee_params):
+                bindings.append(f'(CAss "{callee_params[i]}"%string {arg_coq})')
+        # State-scope the precondition (callee's bare params → state lookups)
+        for p in callee_params:
+            pre_coq = pre_coq.replace(f'({p} ', f'(s "{p}"%string ')
+            pre_coq = pre_coq.replace(f' {p} ', f' s "{p}"%string ')
+            pre_coq = pre_coq.replace(f' {p})', f' s "{p}"%string)')
+        pre_str = f"(fun s => {pre_coq})"
+        post_str = f"(fun s => {post_coq})"
+        call = f'(CCall "{name}"%string {args_list} {pre_str} {post_str} "{target}"%string)'
+        result = call
+        for b in reversed(bindings):
+            result = f"(CSeq {b} {result})"
         return result
 
     def _translate_augassign(self, stmt: ast.AugAssign) -> str:

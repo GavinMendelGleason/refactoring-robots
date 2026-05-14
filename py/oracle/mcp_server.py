@@ -243,7 +243,7 @@ def _verify_function(source: str, func_name: str, hint: str | None = None) -> Go
                           suggestion_text="Fix lint errors in assertions.")
 
     # Generate IMP + Coq
-    imp_body = python_to_imp(func_node)
+    imp_body = python_to_imp(func_node, contract_map=_build_contract_map(tree))
     coq_source = _generate_coq(func_node, lint_results, imp_body, tree, hint)
 
     # Write temp file and compile
@@ -332,8 +332,8 @@ def _try_llm_oracle(source: str, func_name: str, goal: GoalStatus) -> GoalStatus
 
     params = [name for name, _ in _func_params(func_node)]
     expanded, _, params_coq, _, _ = _expand_params(tree, params, func_node)
-    imp_body = python_to_imp(func_node)
-    
+    imp_body = python_to_imp(func_node, contract_map=_build_contract_map(tree))
+
     # Generate full Coq source
     linter_pre = ContractLinter(expanded, "precondition")
     linter_post = ContractLinter(expanded, "postcondition")
@@ -510,6 +510,42 @@ def _is_list_param(annotation) -> bool:
         if isinstance(annotation.value, ast.Name) and annotation.value.id == "list":
             return True
     return False
+
+
+def _build_contract_map(tree) -> dict[str, tuple[list[str], str, str]]:
+    """Build a map of function_name -> (param_names, pre_coq, post_coq) from AST."""
+    import ast
+    from .contract_linter import ContractLinter
+
+    contract_map: dict[str, tuple[list[str], str, str]] = {}
+    for node in ast.iter_child_nodes(tree):
+        if not isinstance(node, ast.FunctionDef):
+            continue
+        name = node.name
+        param_names = [p[0] for p in _func_params(node)]
+
+        linter_pre = ContractLinter(param_names, "precondition")
+        linter_post = ContractLinter(param_names, "postcondition")
+        pres = []
+        posts = []
+        for stmt in node.body:
+            if isinstance(stmt, ast.Assert):
+                cls = _classify_assert(node, stmt)
+                if cls == "precondition":
+                    lr = linter_pre.lint_expression(stmt.test)
+                    if lr.is_valid and lr.coq_translation:
+                        pres.append(lr.coq_translation)
+                elif cls == "postcondition":
+                    lr = linter_post.lint_expression(stmt.test)
+                    if lr.is_valid and lr.coq_translation:
+                        posts.append(lr.coq_translation)
+
+        pre_coq = " /\\ ".join(pres) or "True"
+        post_coq = " /\\ ".join(posts) or "True"
+        if pre_coq != "True" or post_coq != "True":
+            contract_map[name] = (param_names, pre_coq, post_coq)
+
+    return contract_map
 
 
 def _generate_record(node) -> str:

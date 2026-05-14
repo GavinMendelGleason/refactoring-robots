@@ -143,7 +143,8 @@ Inductive com : Type :=
   | CDictSet (name : var) (key val : aexp)
   | CDictGet (name : var) (key : aexp) (target : var)
   | CDictEnsureList (name : var) (key : aexp)
-  | CDictAppend (name : var) (key val : aexp).
+  | CDictAppend (name : var) (key val : aexp)
+  | CCall (name : var) (args : list aexp) (pre post : state -> Prop) (target : var).
 
 (** Big-step operational semantics: [(c, s) ⇓ s']. *)
 Inductive ceval : com -> state -> state -> Prop :=
@@ -204,7 +205,11 @@ Inductive ceval : com -> state -> state -> Prop :=
       let dk := dict_key name (aeval key_e s) in
       ceval (CDictAppend name key_e val_e) s
             (upd (upd s (parray_key dk (s (parray_len_key dk))) (aeval val_e s))
-                 (parray_len_key dk) (s (parray_len_key dk) + 1)).
+                 (parray_len_key dk) (s (parray_len_key dk) + 1))
+  | E_Call : forall name args pre post target s r,
+      pre s ->
+      post (upd s target r) ->
+      ceval (CCall name args pre post target) s (upd s target r).
 
 (** ** Notation *)
 (** Scope for IMP notation (opened locally, not globally). *)
