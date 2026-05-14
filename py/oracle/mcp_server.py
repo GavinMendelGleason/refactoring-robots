@@ -649,6 +649,60 @@ def _imp_aexp_to_coq_z(aexp_str: str) -> str:
     return ""
 
 
+def _loop_exit_condition(loop_node) -> str:
+    """Generate VCG exit condition for a specific loop node."""
+    import ast
+    if isinstance(loop_node, ast.While):
+        return _py_cond_to_vcg_exit(loop_node.test)
+    if isinstance(loop_node, ast.For):
+        if (isinstance(loop_node.iter, ast.Call)
+            and isinstance(loop_node.iter.func, ast.Name)
+            and loop_node.iter.func.id == "range"
+            and loop_node.iter.args):
+            limit = loop_node.iter.args[-1]
+            target_str = loop_node.target.id if isinstance(loop_node.target, ast.Name) else "i"
+            limit_str = _py_expr_to_coq_var(limit)
+            return f"Z.leb ({target_str} + 1) {limit_str} = false"
+    return "Z.leb i n = false"
+
+
+def _loops_with_invariants(func_node, lint_results):
+    """Find the last while/for loop containing invariant assertions.
+    For nested loops, picks the outermost. For sequential, picks the last.
+    Returns list with at most one element.
+    """
+    import ast
+    inv_nodes = set()
+    for r in lint_results:
+        if r.classification == "invariant":
+            inv_nodes.add(id(r.node))
+    if not inv_nodes:
+        return []
+    # Find all loops containing invariants, pick the outermost one
+    candidates = []
+    for node in ast.walk(func_node):
+        if not isinstance(node, (ast.While, ast.For)):
+            continue
+        for body_node in ast.walk(node):
+            if id(body_node) in inv_nodes:
+                loop_invs = [r for r in lint_results
+                           if r.classification == "invariant" and
+                           any(body_node is r.node for body_node in ast.walk(node))]
+                candidates.append((node, loop_invs))
+                break
+    if not candidates:
+        return []
+    if len(candidates) == 1:
+        return candidates
+    # If loops are nested, pick the outermost (first in walk order).
+    # Otherwise (sequential), pick the last (closest to postcondition).
+    loops = [c[0] for c in candidates]
+    # Check if the first loop contains any other candidate loop
+    if any(loop in ast.walk(loops[0]) for loop in loops[1:]):
+        return [candidates[0]]  # nested → outermost
+    return [candidates[-1]]  # sequential → last
+
+
 def _vcg_exit_condition(func_node) -> str:
     """Generate the VCG exit condition from the loop containing invariants.
 
@@ -889,30 +943,60 @@ def _generate_coq(func_node, lint_results, imp_body: str, full_tree=None, hint: 
         for r in posts if r.lint_result.coq_translation
     ) or "True"
 
-    # Check for while/for loops and generate VCG obligation
-    has_while = any(isinstance(n, (ast.While, ast.For)) for n in ast.walk(func_node))
+    # Check for while/for loops and generate VCG obligations (one per loop with invariants)
     vcg_section = ""
-    if has_while and invs:
+    loops_with_invs = _loops_with_invariants(func_node, lint_results)
+    for loop_node, loop_invs in loops_with_invs:
         inv_coq = " /\\ ".join(
             _unscope_vars(r.lint_result.coq_translation)
-            for r in invs if r.lint_result.coq_translation
+            for r in loop_invs if r.lint_result.coq_translation
         ) or "True"
         post_vcg = " /\\ ".join(
             _unscope_vars(r.lint_result.coq_translation)
             for r in posts if r.lint_result.coq_translation
         ) or "True"
-        exit_cond = _vcg_exit_condition(func_node)
+        exit_cond = _loop_exit_condition(loop_node)
         result_scaffold = _vcg_result_scaffold(imp_body)
 
-        # Try SMT first (Level 2) for the VCG — use IR for clean SMT-LIB generation
-        inv_irs = [r.lint_result.ir for r in invs if r.lint_result.ir]
+        inv_irs = [r.lint_result.ir for r in loop_invs if r.lint_result.ir]
         post_irs = [r.lint_result.ir for r in posts if r.lint_result.ir]
         smt_result = _try_smt_vcg_ir(inv_irs, exit_cond, post_irs, result_scaffold)
 
         if smt_result.is_valid:
-            vcg_section = f"""
+            vcg_section += f"""
 (* Verification condition proved by SMT (cvc4) *)
 (* {inv_coq} -> {exit_cond} -> {post_vcg} *)
+"""
+        else:
+            ce_note = ""
+            if smt_result.counterexample:
+                ce_str = ", ".join(f"{k}={v}" for k, v in smt_result.counterexample.items())
+                ce_note = f" (* SMT counterexample: {ce_str} — strengthen invariant to rule this out *)"
+            import re
+            all_vcg_vars = set()
+            for expr in [inv_coq, post_vcg, exit_cond, result_scaffold]:
+                for vname in re.findall(r'\b([a-zA-Z_][a-zA-Z0-9_]*)\b', expr):
+                    if vname not in {'True', 'False', 'true', 'false', 'Z', 'string', 'and', 'or', 'not', 'fun', 's', 'parray_key', 'leb', 'eqb'}:
+                        all_vcg_vars.add(vname)
+            all_vcg_vars.add("result")
+            for vname in ["i", "n"]:
+                if re.search(rf'\b{vname}\b', inv_coq + " " + exit_cond + " " + post_vcg + " " + result_scaffold):
+                    all_vcg_vars.add(vname)
+            vcg_params = " ".join(f"({v} : Z)" for v in sorted(all_vcg_vars))
+            n_params = len(all_vcg_vars)
+            intros_pat = " ".join(["?"] * n_params) + " Hinv Hexit" if n_params > 0 else "Hinv Hexit"
+            vcg_section += f"""(* Verification condition: invariant + exit → postcondition{ce_note} *)
+Theorem {name}_vcg_exit_{loop_node.lineno} : forall {vcg_params},
+  ({inv_coq}) ->
+  {exit_cond} ->
+  {result_scaffold}
+  ({post_vcg}).
+Proof.
+  intros {intros_pat}{' Hres' if result_scaffold.strip() else ''}.
+  apply Z.leb_gt in Hexit.
+  repeat (match goal with [H: _ /\\ _ |- _] => destruct H end).
+  lia.
+Qed.
 """
         if smt_result.is_valid:
             vcg_section = f"""
@@ -960,7 +1044,7 @@ Qed.
 
     # Don't use conditional proof if there's a while loop — CWhile's
     # (fun _ => True) makes the WP trivial; conditional is handled inside.
-    use_conditional_proof = has_cif and not has_while
+    use_conditional_proof = has_cif and not bool(loops_with_invs)
 
     # Determine the proof strategy based on body complexity
     hammer_import = ""

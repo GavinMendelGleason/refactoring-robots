@@ -112,6 +112,9 @@ EXAMPLES = [
     # ── dict iteration (d.values(), d.keys()) ─────────────────────
     ("sum_values", "def sum_values(n: int):\n    assert n>=0\n    d={};i=0\n    while i<n: d[i]=i*i;i+=1\n    total=0\n    for v in d.values(): total+=v\n    result=total\n    assert result>=0\n    return result"),
     ("sum_keys", "def sum_keys(n: int):\n    assert n>=0\n    d={};i=0\n    while i<n: d[i]=i;i+=1\n    total=0\n    for k in d.keys(): total+=k\n    result=total\n    assert result>=0\n    return result"),
+
+    # ── nested loops (outer VCG) ──────────────────────────────────
+    ("nested_sum", "def nested_sum(n: int):\n    assert n>=0\n    total=0;i=0\n    while i<n:\n        assert total==3*i;assert i<=n\n        j=0\n        while j<3:\n            total+=1;j+=1\n        i+=1\n    result=total\n    assert result==3*n\n    return result"),
 ]
 
 
