@@ -97,11 +97,11 @@ def verify_vcg(
 
 
 def _extract_vars(*args: str) -> set[str]:
-    """Extract Z variable names from Coq expressions.
+    """Extract variable-name identifiers from Coq expressions.
 
     Contracts:
-      post: vars_set contains all identifier-like substrings from all args,
-            minus the excluded keyword set.
+      post: vars_set contains all substrings matching [a-zA-Z_][a-zA-Z0-9_]*
+            from all args, minus the excluded keyword set.
     """
     EXCLUDED = {'true', 'false', 'z', 'string', 'and', 'or', 'not',
                 'fun', 's', 'leb', 'parray_key', 'prop'}
@@ -114,11 +114,11 @@ def _extract_vars(*args: str) -> set[str]:
             if c.isalnum() or c == '_':
                 current += c
             else:
-                if current and current[0].isalpha():
+                if current and (current[0].isalpha() or current[0] == '_'):
                     if current.lower() not in EXCLUDED:
                         vars_set.add(current)
                 current = ""
-        if current and current[0].isalpha():
+        if current and (current[0].isalpha() or current[0] == '_'):
             if current.lower() not in EXCLUDED:
                 vars_set.add(current)
     return vars_set
