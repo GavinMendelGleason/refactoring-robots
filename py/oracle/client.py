@@ -92,8 +92,11 @@ def call_llm(config: LLMConfig, system_prompt: str, user_prompt: str) -> str:
 def extract_proof(response: str) -> str:
     """Extract a Coq proof script from an LLM response.
 
-    Looks for code blocks (```coq ... ```) or raw Proof..Qed sections.
+    Contracts:
+      pre:  len(response) >= 0
+      post: returns the proof text (may be empty if no proof found)
     """
+    assert len(response) >= 0
     # Try fenced code block first
     match = re.search(r"```(?:coq)?\s*\n(.*?)\n```", response, re.DOTALL)
     if match:

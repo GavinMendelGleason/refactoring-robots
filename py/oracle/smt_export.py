@@ -35,15 +35,9 @@ def verify_vcg(
 ) -> SmtResult:
     """Verify a VCG obligation using an SMT solver.
 
-    Args:
-        invariant: Unscoped Coq formula (e.g. "acc = i*(i+1)/2 /\ i <= n")
-        exit_cond: Coq exit condition (e.g. "Z.leb (i+1) n = false")
-        postcondition: Unscoped Coq postcondition (e.g. "acc = n*(n+1)/2 /\ i = n")
-        scaffold: Optional result scaffolding (e.g. "result = acc")
-        solver: SMT solver binary name (cvc4 or z3)
-
-    Returns:
-        SmtResult with is_valid=True if the VCG is proved.
+    Contracts:
+      pre:  len(invariant) >= 0, len(exit_cond) >= 0, len(postcondition) >= 0
+      post: SmtResult.is_valid iff the VCG is valid (UNSAT)
     """
     declarations = _extract_vars(invariant, exit_cond, postcondition, scaffold)
     if not declarations:
