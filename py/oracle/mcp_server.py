@@ -466,8 +466,13 @@ def _expand_params(tree, params, func_node: ast.FunctionDef | None = None):
         coq_type = param_types.get(p, "Z")
         cls_name = next((c for c in class_fields if c.lower() == p.lower()), None)
         if p in list_params:
-            # List parameters: expose the length as a Coq parameter,
-            # initialize the _len key in the state. Elements are opaque.
+            # List/vararg parameters: expose the length as a Coq parameter
+            len_var = f"{p}__len"
+            expanded.append(len_var)
+            parts.append(f"({len_var} : Z)")
+            init_state = f'(upd {init_state} "{p}._len"%string {len_var})'
+        elif func_node and func_node.args.vararg and p == func_node.args.vararg.arg:
+            # *args (vararg) — always treated as list
             len_var = f"{p}__len"
             expanded.append(len_var)
             parts.append(f"({len_var} : Z)")
@@ -709,7 +714,7 @@ def _func_params(func_node) -> list[tuple[str, ast.expr | None]]:
     """Extract all named parameters from a function definition.
 
     Returns list of (name, annotation) for positional-only, regular,
-    and keyword-only args. Skips *args and **kwargs.
+    keyword-only args, and *args (vararg). Skips **kwargs.
     """
     import ast
     params = []
@@ -719,6 +724,9 @@ def _func_params(func_node) -> list[tuple[str, ast.expr | None]]:
         params.append((a.arg, a.annotation))
     for a in func_node.args.kwonlyargs:
         params.append((a.arg, a.annotation))
+    if func_node.args.vararg:
+        # *args → expose as list parameter with _len
+        params.append((func_node.args.vararg.arg, func_node.args.vararg.annotation))
     return params
 
 

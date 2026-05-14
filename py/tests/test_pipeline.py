@@ -90,6 +90,18 @@ EXAMPLES = [
         i += 1
     assert i == n
     return i'''),
+
+    # ── Boolean assignment ──────────────────────────────────────────
+    ("bool_assign", "def bool_assign(a: int, b: int):\n assert a>=0; assert b>=0\n is_pos = (a>0) or (b>0)\n result = is_pos\n assert result==1 or result==0\n return result"),
+
+    # ── Set operations ─────────────────────────────────────────────
+    ("set_count", "def set_count(text: str):\n assert len(text)>=0\n seen=set(); count=0; i=0\n while i<len(text):\n  assert count<=i; assert i<=len(text)\n  c=text[i]\n  if c not in seen: seen.add(c); count+=1\n  i+=1\n assert count<=len(text)\n return count"),
+
+    # ── Character scanner ───────────────────────────────────────────
+    ("count_ids", "def count_ids(text: str):\n assert len(text)>=0\n count=0; i=0; cur=0; st=0\n while i<len(text):\n  assert count<=i; assert i<=len(text)\n  c=text[i]\n  if (65<=c and c<=90)or(97<=c and c<=122)or c==95 or(48<=c and c<=57 and st==1): st=1;cur+=1\n  else:\n   if st==1:count+=1\n   st=0;cur=0\n  i+=1\n if st==1:count+=1\n assert count<=len(text)\n return count"),
+
+    # ── for-in-tuple (vararg) ──────────────────────────────────────
+    ("vararg_count", "def vararg_count(*args: str):\n    assert len(args)>=0\n    total=0; ai=0\n    while ai<len(args):\n        assert total>=0; assert ai<=len(args)\n        total+=len(args[ai])\n        ai+=1\n    assert total>=0\n    return total"),
 ]
 
 

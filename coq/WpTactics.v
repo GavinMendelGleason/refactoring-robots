@@ -8,13 +8,21 @@ Open Scope Z_scope.
     Reduces WP goals to simple arithmetic forms that can be
     dispatched by [lia], [reflexivity], or sent to the SMT hammer. *)
 
-(** [wp_reduce] — unfold state, simplify. *)
+(** [wp_reduce] — unfold state, aeval, beval; simplify. *)
 Ltac wp_reduce :=
-  unfold wp, upd; simpl.
+  unfold wp, upd, aeval, beval; simpl.
 
 (** [wp_prove] — wp_reduce + trivial + lia (closes simple goals). *)
 Ltac wp_prove :=
-  wp_reduce; try reflexivity; try lia.
+  wp_reduce;
+  try reflexivity;
+  try lia;
+  try (match goal with
+  | [ |- (if ?c then _ else _) = _ \/ (if ?c then _ else _) = _ ] =>
+      destruct c; auto
+  | [ |- ?x = 1 \/ ?x = 0 ] =>
+      destruct (Z.eqb x 1) eqn:?; auto; right; lia
+  end).
 
 (** [vcg_exit] — proves the while-exit verification condition.
     The goal is: vcg_while_exit b inv Q
