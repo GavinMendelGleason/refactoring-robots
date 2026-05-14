@@ -142,6 +142,12 @@ EXAMPLES = [
 
     # ── BEq conditional (== comparison) ───────────────────────────
     ("str_eq", "def str_eq(s: str):\n    assert len(s)>=0\n    if s==\"hello\": result=1\n    else: result=0\n    assert result==1 or result==0\n    return result"),
+
+    # ── Data contracts ────────────────────────────────────────────
+    ("is_sorted", "def is_sorted(lst: list[int]):\n    assert len(lst)>=0\n    i=0\n    while i<len(lst)-1:\n        assert i<=len(lst)\n        if lst[i]>lst[i+1]:return 1\n        i+=1\n    return 0"),
+    ("in_vocab", "def in_vocab(items: list[int]):\n    assert len(items)>=0\n    vocab=set();vocab.add(1);vocab.add(2);vocab.add(3)\n    i=0\n    while i<len(items):\n        assert i<=len(items)\n        if items[i] not in vocab:return 1\n        i+=1\n    return 0"),
+    ("iso_date", "def iso_date(text: str):\n    assert len(text)>=0\n    if len(text)!=10:return 1\n    if text[4]!=45 or text[7]!=45:return 1\n    i=0\n    while i<10:\n        assert i<=10\n        if i!=4 and i!=7:\n            if text[i]<48 or text[i]>57:return 1\n        i+=1\n    return 0"),
+    ("unique_items", "def unique_items(items: list[int]):\n    assert len(items)>=0\n    i=0\n    while i<len(items):\n        assert i<=len(items)\n        j=i+1\n        while j<len(items):\n            assert j<=len(items)\n            if items[i]==items[j]:return 1\n            j+=1\n        i+=1\n    return 0"),
 ]
 
 
