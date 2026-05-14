@@ -947,7 +947,7 @@ Theorem {name}_vcg_exit : forall {vcg_params},
   {result_scaffold}
   ({post_vcg}).
 Proof.
-  intros {intros_pat} Hres.
+  intros {intros_pat}{' Hres' if result_scaffold.strip() else ''}.
   apply Z.leb_gt in Hexit.
   repeat (match goal with [H: _ /\\ _ |- _] => destruct H end).
   lia.

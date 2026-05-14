@@ -140,5 +140,35 @@ class DictCountExpr(BaseModel):
         return f"{self.name}__count"
 
 
+class AllExpr(BaseModel):
+    """all(p(x) for x in lst) — universal quantifier over list."""
+    kind: Literal["all"] = "all"
+    var: str
+    lst: str
+    pred: "Expr"
+
+    def to_coq(self, scoped: bool = False) -> str:
+        return "True"  # quantifiers not in Coq VCG — handled by SMT
+
+    def to_smt(self) -> str:
+        p = self.pred.to_smt()
+        return f"(forall (({self.var} Int)) (=> (and (<= 0 {self.var}) (< {self.var} {self.lst}__len)) {p}))"
+
+
+class AnyExpr(BaseModel):
+    """any(p(x) for x in lst) — existential quantifier over list."""
+    kind: Literal["any"] = "any"
+    var: str
+    lst: str
+    pred: "Expr"
+
+    def to_coq(self, scoped: bool = False) -> str:
+        return "True"
+
+    def to_smt(self) -> str:
+        p = self.pred.to_smt()
+        return f"(exists (({self.var} Int)) (and (and (<= 0 {self.var}) (< {self.var} {self.lst}__len)) {p}))"
+
+
 # Discriminated union type for exhaustiveness checking
-Expr = Union[Var, IntLit, BoolLit, BinOp, Logical, LenExpr, IndexExpr, DictLenExpr, DictCountExpr]
+Expr = Union[Var, IntLit, BoolLit, BinOp, Logical, LenExpr, IndexExpr, DictLenExpr, DictCountExpr, AllExpr, AnyExpr]

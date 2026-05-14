@@ -14,7 +14,8 @@ from pathlib import Path
 from typing import Optional
 
 from .contract_ir import (
-    Expr, Var, IntLit, BoolLit, BinOp, Logical, LenExpr, IndexExpr, DictLenExpr, DictCountExpr,
+    Expr, Var, IntLit, BoolLit, BinOp, Logical, LenExpr, IndexExpr,
+    DictLenExpr, DictCountExpr, AllExpr, AnyExpr,
 )
 
 
@@ -284,8 +285,24 @@ class ContractLinter(ast.NodeVisitor):
         if name == "isinstance":
             return BoolLit(value=True)
         if name in ("all", "any"):
-            return BoolLit(value=True)  # approximate
+            return self._translate_quantifier(node, name)
         return IntLit(value=0)
+
+    def _translate_quantifier(self, node: ast.Call, name: str) -> Optional[Expr]:
+        """Translate all(p(x) for x in lst) or any(...) to AllExpr/AnyExpr."""
+        if node.args and isinstance(node.args[0], ast.GeneratorExp):
+            gen = node.args[0]
+            if gen.generators and len(gen.generators) == 1:
+                comp = gen.generators[0]
+                if isinstance(comp.target, ast.Name) and isinstance(comp.iter, ast.Name):
+                    var = comp.target.id
+                    lst = comp.iter.id
+                    pred = self.visit(gen.elt)
+                    if pred:
+                        if name == "all":
+                            return AllExpr(var=var, lst=lst, pred=pred)
+                        return AnyExpr(var=var, lst=lst, pred=pred)
+        return BoolLit(value=True)
 
 
 # ─── File-level linter (unchanged classification logic) ───────────
