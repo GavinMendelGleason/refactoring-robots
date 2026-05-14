@@ -31,6 +31,8 @@ Fixpoint wp (c : com) (Q : assertion) : assertion :=
       fun s => let len := s (parray_len_key name) in
                Q (upd (upd s (parray_key name len) (aeval val s))
                       (parray_len_key name) (len + 1))
+  | CListPop name =>
+      fun s => Q (upd s (parray_len_key name) (s (parray_len_key name) - 1))
   | CListSet name idx_e val_e =>
       fun s => Q (upd s (parray_key name (aeval idx_e s)) (aeval val_e s))
   | CDictSet name key_e val_e =>

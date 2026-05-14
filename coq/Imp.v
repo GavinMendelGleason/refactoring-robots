@@ -138,6 +138,7 @@ Inductive com : Type :=
   | CHavoc (vars : list var)
   | CListNew (name : var)
   | CListAppend (name : var) (val : aexp)
+  | CListPop (name : var)
   | CListSet (name : var) (idx val : aexp)
   | CDictSet (name : var) (key val : aexp)
   | CDictGet (name : var) (key : aexp) (target : var)
@@ -180,6 +181,9 @@ Inductive ceval : com -> state -> state -> Prop :=
       ceval (CListAppend name val) s
             (upd (upd s (parray_key name (s (parray_len_key name))) (aeval val s))
                  (parray_len_key name) (s (parray_len_key name) + 1))
+  | E_ListPop : forall name s,
+      ceval (CListPop name) s
+            (upd s (parray_len_key name) (s (parray_len_key name) - 1))
   | E_ListSet : forall name idx_e val_e s,
       ceval (CListSet name idx_e val_e) s
             (upd s (parray_key name (aeval idx_e s)) (aeval val_e s))

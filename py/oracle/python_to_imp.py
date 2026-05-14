@@ -106,6 +106,11 @@ class ImpTranslator:
         value = stmt.value
         if isinstance(value, ast.Call):
             name = self._get_call_name(value)
+            if name and name.endswith(".pop") and not value.args:
+                # list.pop() → CListPop
+                obj = self._get_call_object(value)
+                if obj:
+                    return f'(CListPop "{obj}"%string)'
             if name and name.endswith(".append") and value.args:
                 obj = self._get_call_object(value)
                 if obj:
