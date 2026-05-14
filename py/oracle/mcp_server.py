@@ -145,7 +145,7 @@ def tool_check_function(args: dict) -> str:
 
     # Step 2b: If Level 1 couldn't close the goal, try LLM oracle
     if goal and not goal.is_proved():
-        goal = _try_llm_oracle(source, func_name, goal)
+        goal = _try_llm_oracle(source, func_name, goal, args.get("hint"))
         elapsed = (time.time() - t0) * 1000
 
     # Step 3: Build report
@@ -306,7 +306,7 @@ def _verify_function(source: str, func_name: str, hint: str | None = None) -> Go
             tmp_path.unlink(missing_ok=True)
 
 
-def _try_llm_oracle(source: str, func_name: str, goal: GoalStatus) -> GoalStatus:
+def _try_llm_oracle(source: str, func_name: str, goal: GoalStatus, hint: str | None = None) -> GoalStatus:
     """Try to prove remaining goals using the LLM oracle."""
     if not goal or goal.is_proved():
         return goal
