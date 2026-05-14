@@ -118,6 +118,15 @@ EXAMPLES = [
 
     # ── list slicing in contracts ─────────────────────────────────
     ("slice_len", "def slice_len(n: int):\n    assert n>=0\n    result=[];i=0\n    while i<n:\n        assert len(result)==i;assert i<=n\n        result.append(i);i+=1\n    assert len(result[0:n])==n\n    return result"),
+
+    # ── all() in contracts (SMT quantifier) ────────────────────────
+    ("all_positive", "def all_positive(n: int):\n    assert n>=0\n    result=[];i=0\n    while i<n:\n        assert i<=n\n        result.append(i+1);i+=1\n    assert all(x>0 for x in result)\n    return result"),
+
+    # ── negative-step for-range ───────────────────────────────────
+    ("rev_range", "def rev_range(n: int):\n    assert n>=0\n    count=0\n    for i in range(n-1,-1,-1):\n        count+=1\n    result=count\n    assert result==n\n    return result"),
+
+    # ── CCall: function call verification ─────────────────────────
+    ("caller", "def square(x: int):\n    assert x>=0\n    result=x*x\n    assert result>=x\n    return result\ndef caller(n: int):\n    assert n>=0\n    total=square(n)\n    assert total>=n\n    return total"),
 ]
 
 
