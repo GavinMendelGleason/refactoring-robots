@@ -913,13 +913,15 @@ def _generate_coq(func_node, lint_results, imp_body: str, full_tree=None, hint: 
                 ce_note = f" (* SMT counterexample: {ce_str} — strengthen invariant to rule this out *)"
             import re
             all_vcg_vars = set()
-            for expr in [inv_coq, post_vcg]:
+            for expr in [inv_coq, post_vcg, exit_cond, result_scaffold]:
                 for vname in re.findall(r'\b([a-zA-Z_][a-zA-Z0-9_]*)\b', expr):
-                    if vname not in {'True', 'False', 'Z', 'string', 'and', 'or', 'not', 'fun', 's', 'parray_key'}:
+                    if vname not in {'True', 'False', 'true', 'false', 'Z', 'string', 'and', 'or', 'not', 'fun', 's', 'parray_key', 'leb', 'eqb'}:
                         all_vcg_vars.add(vname)
             all_vcg_vars.add("result")
+            # Always include common loop variables
             for vname in ["i", "n"]:
-                all_vcg_vars.add(vname)
+                if re.search(rf'\b{vname}\b', inv_coq + " " + exit_cond + " " + post_vcg + " " + result_scaffold):
+                    all_vcg_vars.add(vname)
             vcg_params = " ".join(f"({v} : Z)" for v in sorted(all_vcg_vars))
             n_params = len(all_vcg_vars)
             intros_pat = " ".join(["?"] * n_params) + " Hinv Hexit" if n_params > 0 else "Hinv Hexit"
