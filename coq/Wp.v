@@ -59,9 +59,10 @@ Fixpoint wp (c : com) (Q : assertion) : assertion :=
                let is_new := Z.eqb 0 (s (parray_len_key dk)) in
                let c := s (dict_count_key name) in
                let new_c := c + (if is_new then 1 else 0) in
-               Q (upd (upd (upd (upd s dk (aeval val_e s))
-                                (parray_len_key dk) 1)
-                           (parray_key (dict_vals_key name) c) (aeval val_e s))
+               let s1 := upd (upd (upd s dk (aeval val_e s))
+                                  (parray_len_key dk) 1)
+                             (parray_key (dict_vals_key name) c) (aeval val_e s) in
+               Q (upd (upd s1 (parray_key (dict_keys_key name) c) (aeval key_e s))
                       (dict_count_key name) new_c)
   | CCall name args pre post target =>
       fun s => pre s ->

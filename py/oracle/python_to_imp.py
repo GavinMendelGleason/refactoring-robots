@@ -400,6 +400,12 @@ class ImpTranslator:
         # for x in d.values(), d.keys(), etc.
         if isinstance(stmt.iter, ast.Call):
             name = self._get_call_name(stmt.iter)
+            if name and name.endswith(".items"):
+                obj = self._translate_target(stmt.iter.func.value)
+                if isinstance(stmt.target, ast.Tuple) and len(stmt.target.elts) == 2:
+                    k_name = self._translate_target(stmt.target.elts[0])
+                    v_name = self._translate_target(stmt.target.elts[1])
+                    return self._build_for_items(k_name, v_name, obj, stmt)
             if name and name.endswith(".values"):
                 obj = self._translate_target(stmt.iter.func.value)
                 return self._build_for_in_name(target, f"{obj}._vals", stmt)
@@ -421,6 +427,22 @@ class ImpTranslator:
         incr = f'(CAss "{loop_var}"%string (APlus (AVar \"{loop_var}\"%string) {step_val}))'
         inv = self._invariants.get(stmt.lineno, "(fun _ => True)")
         loop_body = f"(CSeq {elem_load} (CSeq {body_cmds} {incr}))"
+        loop = f"(CWhile {cond} {inv} {loop_body})"
+        return f"(CSeq {init} {loop})"
+
+    def _build_for_items(self, k_name: str, v_name: str, obj: str, stmt: ast.For) -> str:
+        """Build for k, v in d.items(): while loop over _keys and _vals."""
+        start_val = "(ANum 0)"
+        step_val = "(ANum 1)"
+        loop_var = "_i"
+        init = f'(CAss "{loop_var}"%string {start_val})'
+        cond = f"(BLe (APlus (AVar \"{loop_var}\"%string) {step_val}) (ALen \"{obj}._keys\"%string))"
+        body_cmds = self.translate_body(stmt.body) or "CSkip"
+        k_load = f'(CAss "{k_name}"%string (AIndex \"{obj}._keys\"%string (AVar \"{loop_var}\"%string)))'
+        v_load = f'(CAss "{v_name}"%string (AIndex \"{obj}._vals\"%string (AVar \"{loop_var}\"%string)))'
+        incr = f'(CAss "{loop_var}"%string (APlus (AVar \"{loop_var}\"%string) {step_val}))'
+        inv = self._invariants.get(stmt.lineno, "(fun _ => True)")
+        loop_body = f"(CSeq {k_load} (CSeq {v_load} (CSeq {body_cmds} {incr})))"
         loop = f"(CWhile {cond} {inv} {loop_body})"
         return f"(CSeq {init} {loop})"
 

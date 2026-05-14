@@ -221,10 +221,11 @@ Inductive ceval : com -> state -> state -> Prop :=
       let is_new := Z.eqb 0 (s (parray_len_key dk)) in
       let c := s (dict_count_key name) in
       let new_c := c + (if is_new then 1 else 0) in
+      let s1 := upd (upd (upd s dk (aeval val_e s))
+                         (parray_len_key dk) 1)
+                    (parray_key (dict_vals_key name) c) (aeval val_e s) in
       ceval (CDictAppendKv name key_e val_e) s
-            (upd (upd (upd (upd s dk (aeval val_e s))
-                           (parray_len_key dk) 1)
-                      (parray_key (dict_vals_key name) c) (aeval val_e s))
+            (upd (upd s1 (parray_key (dict_keys_key name) c) (aeval key_e s))
                  (dict_count_key name) new_c)
   | E_Call : forall name args pre post target s r,
       pre s ->
