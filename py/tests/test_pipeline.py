@@ -139,6 +139,9 @@ EXAMPLES = [
 
     # ── list comprehension ────────────────────────────────────────
     ("squares", "def squares(n: int):\n    assert n>=0\n    result=[i*i for i in range(n)]\n    assert len(result)==n\n    return result"),
+
+    # ── BEq conditional (== comparison) ───────────────────────────
+    ("str_eq", "def str_eq(s: str):\n    assert len(s)>=0\n    if s==\"hello\": result=1\n    else: result=0\n    assert result==1 or result==0\n    return result"),
 ]
 
 

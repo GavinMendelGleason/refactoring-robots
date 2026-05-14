@@ -1038,40 +1038,16 @@ Proof.
 Qed.
 """
 
-    has_bor = "BOr" in imp_body
-    has_cif = "CIf" in imp_body
-    has_call = "CCall" in imp_body
+    use_conditional_proof = False  # wp_prove handles conditionals generically now
 
-    # Don't use conditional proof if there's a while loop — CWhile's
-    # (fun _ => True) makes the WP trivial; conditional is handled inside.
-    use_conditional_proof = has_cif and not bool(loops_with_invs)
-
-    # Determine the proof strategy based on body complexity
     hammer_import = ""
     if hint == "hammer":
         hammer_import = "From Hammer Require Import Hammer.\n"
-        hammer_config = "  Set Hammer ATPLimit 30.\n  Set Hammer ReconstrLimit 10.\n"
-        if use_conditional_proof:
-            if has_bor:
-                proof = hammer_config + "  intros.\n  wp_reduce.\n  split; intro Hb.\n  - apply Bool.orb_true_iff in Hb. destruct Hb as [Hc|Hc]; apply Z.leb_le in Hc; wp_prove; split; try lia; try hammer.\n  - apply Bool.orb_false_iff in Hb. destruct Hb as [Hc1 Hc2]; apply Z.leb_gt in Hc1; apply Z.leb_gt in Hc2; wp_prove; split; try lia; try hammer."
-            else:
-                proof = hammer_config + "  intros.\n  wp_reduce.\n  split; [ intro Hle; apply Z.leb_le in Hle | intro Hgt; apply Z.leb_gt in Hgt ];\n  wp_prove; split; try lia; try hammer.\n  (* If hammer still fails, try LLM oracle *)"
-        else:
-            proof = hammer_config + "  intros.\n  wp_reduce.\n  hammer."
-    elif use_conditional_proof:
-        if has_bor:
-            proof = "  intros.\n  wp_reduce.\n  split; intro Hb.\n  - apply Bool.orb_true_iff in Hb. destruct Hb as [Hc|Hc]; apply Z.leb_le in Hc; wp_prove; split; lia.\n  - apply Bool.orb_false_iff in Hb. destruct Hb as [Hc1 Hc2]; apply Z.leb_gt in Hc1; apply Z.leb_gt in Hc2; wp_prove; split; lia."
-        else:
-            proof = "  intros.\n  wp_reduce.\n  split; [ intro Hle; apply Z.leb_le in Hle | intro Hgt; apply Z.leb_gt in Hgt ];\n  wp_prove; split; lia."
+        proof = "  intros.\n  wp_reduce.\n  hammer."
     else:
         proof = "  intros.\n  wp_prove."
 
-    if has_call:
-        # CCall introduces forall r — apply after wp_reduce
-        proof = "  intros.\n  wp_reduce.\n  repeat (match goal with [H: forall _:Z, ?P -> ?Q |- ?Q] => eapply H; [assumption | simpl; reflexivity] end)."
-        proof += "\n  try lia."
-
-    bool_import = "Require Import Bool.\n" if has_bor else ""
+    bool_import = "Require Import Bool.\n" if "BOr" in imp_body else ""
 
     return f"""(* Auto-generated from {name} *)
 {hammer_import}

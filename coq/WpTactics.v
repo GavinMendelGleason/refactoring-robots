@@ -13,8 +13,7 @@ Ltac wp_reduce :=
   unfold wp, upd, aeval, beval; simpl.
 
 (** [wp_prove] — structural recursion over goal shape after wp_reduce.
-    Handles conjunctions, disjunctions, ABool cases, reflexivity, lia.
-    Does NOT intro forall/-> (handled by the proof template's intros). *)
+    Handles conjunctions, disjunctions, ABool, comparisons, reflexivity, lia. *)
 Ltac wp_prove :=
   wp_reduce;
   match goal with
@@ -23,6 +22,10 @@ Ltac wp_prove :=
       destruct c; auto
   | |- _ \/ _ => (left; wp_prove) || (right; wp_prove)
   | |- ?x = ?x => reflexivity
+  | [ H: Z.leb ?a ?b = true |- _ ] => apply Z.leb_le in H; wp_prove
+  | [ H: Z.leb ?a ?b = false |- _ ] => apply Z.leb_gt in H; wp_prove
+  | [ H: Z.eqb ?a ?b = true |- _ ] => apply Z.eqb_eq in H; subst; wp_prove
+  | [ H: Z.eqb ?a ?b = false |- _ ] => apply Z.eqb_neq in H; wp_prove
   | |- _ => try lia; try reflexivity; try auto
   end.
 
