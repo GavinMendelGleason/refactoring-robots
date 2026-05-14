@@ -65,7 +65,6 @@ class ImpTranslator:
             return "CSkip"
         if len(commands) == 1:
             return commands[0]
-        # Build nested CSeq: CSeq c1 (CSeq c2 (...))
         result = commands[-1]
         for cmd in reversed(commands[:-1]):
             result = f"(CSeq {cmd} {result})"
@@ -118,7 +117,7 @@ class ImpTranslator:
         if isinstance(node, ast.Constant):
             val = node.value
             if isinstance(val, bool):
-                return "BTrue" if val else "BFalse"
+                return "(ABool BTrue)" if val else "(ABool BFalse)"
             if isinstance(val, int):
                 return f"(ANum {val})"
             if val is None:
@@ -290,22 +289,49 @@ class ImpTranslator:
         return "CSkip"
 
     def _translate_if(self, stmt: ast.If) -> str:
-        test = self.translate_expr(stmt.test)
+        test = self._truthify(stmt.test)
         then_body = self.translate_body(stmt.body)
         else_body = self.translate_body(stmt.orelse) if stmt.orelse else "CSkip"
         return f"(CIf {test} {then_body} {else_body})"
 
     def _translate_while(self, stmt: ast.While) -> str:
-        test = self.translate_expr(stmt.test)
+        test = self._truthify(stmt.test)
         body = self.translate_body(stmt.body)
-        # While loops: use (fun _ => True) in IMP body.
-        # The actual invariant is proved separately by the VCG — embedding
-        # complex invariants (with division etc.) breaks wp_prove at entry.
         inv = "(fun _ => True)"
         return f"(CWhile {test} {inv} {body})"
 
+    def _truthify(self, node: ast.expr) -> str:
+        """Convert a Python expression to an IMP bexp for use in condition context.
+
+        Handles Python truthiness rules:
+        - int/float x → x != 0
+        - list lst → len(lst) > 0
+        - bool/compare → as-is
+        - dict d → len(d) > 0
+        - string s → len(s) > 0
+        """
+        if isinstance(node, ast.Compare):
+            return self._translate_compare(node)
+        if isinstance(node, ast.BoolOp):
+            return self._translate_boolop(node)
+        if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
+            inner = self._truthify(node.operand)
+            return f"(BNot {inner})"
+        if isinstance(node, ast.Constant) and isinstance(node.value, bool):
+            return "BTrue" if node.value else "BFalse"
+        if isinstance(node, ast.Name):
+            return f"(BNot (BEq (AVar \"{node.id}\"%string) (ANum 0)))"
+        if isinstance(node, ast.Call):
+            name = self._get_call_name(node)
+            if name == "len" and node.args and isinstance(node.args[0], ast.Name):
+                return f"(BLe (ANum 1) (ALen \"{node.args[0].id}\"%string))"
+        # Fallback: expr != 0
+        val = self.translate_expr(node)
+        return f"(BNot (BEq {val} (ANum 0)))"
+
     def _translate_for(self, stmt: ast.For) -> str:
         target = self._translate_target(stmt.target)
+        # range(n), range(start, stop), range(start, stop, step)
         if (isinstance(stmt.iter, ast.Call)
             and isinstance(stmt.iter.func, ast.Name)
             and stmt.iter.func.id == "range"):
@@ -323,24 +349,44 @@ class ImpTranslator:
                 limit_val = self.translate_expr(args[1])
                 step_val = self.translate_expr(args[2])
             else:
-                return f"(* untranslated for: {ast.unparse(stmt)} *)"
+                return f"(* untranslated for-range: {ast.unparse(stmt)} *)"
+            return self._build_for_loop(target, start_val, limit_val, step_val, stmt)
 
-            body_cmds = self.translate_body(stmt.body)
-            if not body_cmds:
-                body_cmds = "CSkip"
-            incr = f'(CAss "{target}"%string (APlus (AVar "{target}"%string) {step_val}))'
-
-            # Use user-provided invariant if found, else generate default from bounds
-            inv = self._invariants.get(stmt.lineno)
-            if inv is None or inv == "(fun _ => True)":
-                inv = self._default_for_invariant(target, limit_val, start_val)
-
-            init = f'(CAss "{target}"%string {start_val})'
-            cond = f"(BLe (APlus (AVar \"{target}\"%string) {step_val}) {limit_val})"
-            loop_body = body_cmds if body_cmds == "CSkip" else f"(CSeq {body_cmds} {incr})"
+        # for x in expr: (string or list iteration)
+        iter_expr = self.translate_expr(stmt.iter)
+        start_val = "(ANum 0)"
+        limit_expr = f"(ALen {iter_expr})" if isinstance(stmt.iter, ast.Name) else "(ANum 0)"
+        step_val = "(ANum 1)"
+        if isinstance(stmt.iter, ast.Name):
+            # Pre-bind: i = 0; while i < len(expr): target = expr[i]; body; i += 1
+            loop_var = "_i"
+            init = f'(CAss "{loop_var}"%string {start_val})'
+            cond = f"(BLe (APlus (AVar \"{loop_var}\"%string) {step_val}) (ALen \"{stmt.iter.id}\"%string))"
+            body_cmds = self.translate_body(stmt.body) or "CSkip"
+            elem_load = f'(CAss "{target}"%string (AIndex \"{stmt.iter.id}\"%string (AVar \"{loop_var}\"%string)))'
+            incr = f'(CAss "{loop_var}"%string (APlus (AVar \"{loop_var}\"%string) {step_val}))'
+            inv = self._invariants.get(stmt.lineno, "(fun _ => True)")
+            loop_body = f"(CSeq {elem_load} (CSeq {body_cmds} {incr}))"
             loop = f"(CWhile {cond} {inv} {loop_body})"
             return f"(CSeq {init} {loop})"
-        return f"(* untranslated for: {ast.unparse(stmt)} *)"
+        return f"(* untranslated for-in: {ast.unparse(stmt)} *)"
+
+    def _build_for_loop(self, target: str, start_val: str, limit_val: str, step_val: str, stmt: ast.For) -> str:
+        body_cmds = self.translate_body(stmt.body)
+        if not body_cmds:
+            body_cmds = "CSkip"
+        incr = f'(CAss "{target}"%string (APlus (AVar "{target}"%string) {step_val}))'
+
+        # Use user-provided invariant if found, else generate default from bounds
+        inv = self._invariants.get(stmt.lineno)
+        if inv is None or inv == "(fun _ => True)":
+            inv = self._default_for_invariant(target, limit_val, start_val)
+
+        init = f'(CAss "{target}"%string {start_val})'
+        cond = f"(BLe (APlus (AVar \"{target}\"%string) {step_val}) {limit_val})"
+        loop_body = body_cmds if body_cmds == "CSkip" else f"(CSeq {body_cmds} {incr})"
+        loop = f"(CWhile {cond} {inv} {loop_body})"
+        return f"(CSeq {init} {loop})"
 
     def _default_for_invariant(self, target: str, limit_coq: str, start_coq: str) -> str:
         r"""Generate a default loop invariant from range bounds.

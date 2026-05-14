@@ -50,7 +50,8 @@ Proof.
   subst x. subst y. exfalso. apply Hne. reflexivity.
 Qed.
 
-(** ** Arithmetic Expressions *)
+(** ** Arithmetic and Boolean Expressions (mutually recursive) *)
+
 Inductive aexp : Type :=
   | ANum (n : Z)
   | AVar (x : var)
@@ -62,7 +63,16 @@ Inductive aexp : Type :=
   | ALen (name : var)
   | AIndex (name : var) (idx : aexp)
   | ADictLen (name : var) (key_e : aexp)
-  | ADictCount (name : var).
+  | ADictCount (name : var)
+  | ABool (b : bexp)
+with bexp : Type :=
+  | BTrue
+  | BFalse
+  | BEq (a1 a2 : aexp)
+  | BLe (a1 a2 : aexp)
+  | BNot (b : bexp)
+  | BAnd (b1 b2 : bexp)
+  | BOr (b1 b2 : bexp).
 
 (** Convert Z to string for array key encoding. *)
 Fixpoint pos_to_string (p : positive) : string :=
@@ -91,7 +101,7 @@ Definition dict_key (name : var) (key : Z) : var :=
 Definition dict_count_key (name : var) : var :=
   (name ++ "._count")%string.
 
-(** Evaluation of arithmetic expressions. *)
+(** Evaluation of arithmetic and boolean expressions. *)
 Fixpoint aeval (a : aexp) (s : state) : Z :=
   match a with
   | ANum n => n
@@ -105,20 +115,9 @@ Fixpoint aeval (a : aexp) (s : state) : Z :=
   | AIndex name idx_e => s (parray_key name (aeval idx_e s))
   | ADictLen name key_e => s (parray_len_key (dict_key name (aeval key_e s)))
   | ADictCount name => s (dict_count_key name)
-  end.
-
-(** ** Boolean Expressions *)
-Inductive bexp : Type :=
-  | BTrue
-  | BFalse
-  | BEq (a1 a2 : aexp)
-  | BLe (a1 a2 : aexp)
-  | BNot (b : bexp)
-  | BAnd (b1 b2 : bexp)
-  | BOr (b1 b2 : bexp).
-
-(** Evaluation of boolean expressions. *)
-Fixpoint beval (b : bexp) (s : state) : bool :=
+  | ABool b => if beval b s then 1%Z else 0%Z
+  end
+with beval (b : bexp) (s : state) : bool :=
   match b with
   | BTrue => true
   | BFalse => false
@@ -212,5 +211,4 @@ Inductive ceval : com -> state -> state -> Prop :=
       ceval (CCall name args pre post target) s (upd s target r).
 
 (** ** Notation *)
-(** Scope for IMP notation (opened locally, not globally). *)
 Open Scope Z_scope.
