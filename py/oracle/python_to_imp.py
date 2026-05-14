@@ -346,14 +346,18 @@ class ImpTranslator:
                 start_val = self.translate_expr(args[0])
                 limit_val = self.translate_expr(args[1])
                 step_val = self.translate_expr(args[2])
+                step_const = _eval_const(args[2])
+                if step_const is None:
+                    return f"(* untranslated for-range (dynamic step): {ast.unparse(stmt)} *)"
+                step_is_neg = step_const < 0
             else:
                 return f"(* untranslated for-range: {ast.unparse(stmt)} *)"
-            return self._build_for_loop(target, start_val, limit_val, step_val, stmt)
+            return self._build_for_loop(target, start_val, limit_val, step_val, stmt, step_is_neg if len(args) >= 3 else False)
+            return self._build_for_loop(target, start_val, limit_val, step_val, stmt, step_is_neg if len(args) >= 3 else False)
 
         # for x in expr: (string or list iteration)
         if isinstance(stmt.iter, ast.Name):
             return self._build_for_in_name(target, stmt.iter.id, stmt)
-        # Generic for-in: try while+index loop
         return f"(* untranslated for-in: {ast.unparse(stmt)} *)"
 
     def _build_for_in_name(self, target: str, iter_name: str, stmt: ast.For) -> str:
@@ -371,49 +375,42 @@ class ImpTranslator:
         loop = f"(CWhile {cond} {inv} {loop_body})"
         return f"(CSeq {init} {loop})"
 
-    def _build_for_loop(self, target: str, start_val: str, limit_val: str, step_val: str, stmt: ast.For) -> str:
+    def _build_for_loop(self, target: str, start_val: str, limit_val: str, step_val: str, stmt: ast.For, step_is_neg: bool = False) -> str:
         body_cmds = self.translate_body(stmt.body)
         if not body_cmds:
             body_cmds = "CSkip"
         incr = f'(CAss "{target}"%string (APlus (AVar "{target}"%string) {step_val}))'
 
-        # Use user-provided invariant if found, else generate default from bounds
         inv = self._invariants.get(stmt.lineno)
         if inv is None or inv == "(fun _ => True)":
             inv = self._default_for_invariant(target, limit_val, start_val)
 
         init = f'(CAss "{target}"%string {start_val})'
-        cond = f"(BLe (APlus (AVar \"{target}\"%string) {step_val}) {limit_val})"
+        if step_is_neg:
+            cond = f"(BNot (BLe (APlus (AVar \"{target}\"%string) {step_val}) {limit_val}))"
+        else:
+            cond = f"(BLe (APlus (AVar \"{target}\"%string) {step_val}) {limit_val})"
         loop_body = body_cmds if body_cmds == "CSkip" else f"(CSeq {body_cmds} {incr})"
         loop = f"(CWhile {cond} {inv} {loop_body})"
         return f"(CSeq {init} {loop})"
 
     def _default_for_invariant(self, target: str, limit_coq: str, start_coq: str) -> str:
-        r"""Generate a default loop invariant from range bounds.
-
-        For `for i in range(n):`, generates `0 <= s"i" /\ s"i" <= s"n"`.
-        Uses state lookups so the invariant is self-contained (no free Coq variables).
+        """Generate a default loop invariant from range bounds.
+        Only generates for simple constant bounds; falls back to (fun _ => True).
         """
         import re
-
-        # Convert a Coq aexp string to a Z expression usable inside (fun s => ...)
-        def aexp_to_z(coq_str: str) -> str:
-            m = re.match(r'\(AVar "([^"]+)"%string\)', coq_str)
-            if m:
-                return f's "{m.group(1)}"%string'
-            m = re.match(r'\(ANum (-?\d+)\)', coq_str)
-            if m:
-                return m.group(1)
-            return coq_str
-
-        start_z = aexp_to_z(start_coq)
-        limit_z = aexp_to_z(limit_coq)
-
-        return (
-            f'(fun s => '
-            f'{start_z} <= s "{target}"%string /\\ '
-            f's "{target}"%string <= {limit_z})'
-        )
+        # Only handle simple ANum or AVar bounds
+        def simple_z(coq_str: str) -> str | None:
+            m = re.match(r'\(ANum (-?\d+)\)', coq_str.strip())
+            if m: return m.group(1)
+            m = re.match(r'\(AVar "([^"]+)"%string\)', coq_str.strip())
+            if m: return f's "{m.group(1)}"%string'
+            return None
+        start_z = simple_z(start_coq)
+        limit_z = simple_z(limit_coq)
+        if start_z and limit_z:
+            return f'(fun s => {start_z} <= s "{target}"%string /\\ s "{target}"%string <= {limit_z})'
+        return '(fun _ => True)'
 
     def _translate_boolop(self, node: ast.BoolOp) -> str:
         if isinstance(node.op, ast.And):
@@ -610,3 +607,5 @@ class InvariantFinder(ast.NodeVisitor):
             else:
                 joined = " /\\ ".join(inv_parts)
                 self.invariants[loop_line] = f"(fun s => {joined})"
+def _eval_const(node):
+    import ast; v = ast.literal_eval(node); return v if isinstance(v, int) else None
