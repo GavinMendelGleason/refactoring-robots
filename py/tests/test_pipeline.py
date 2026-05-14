@@ -136,6 +136,9 @@ EXAMPLES = [
 
     # ── slice copy in body ────────────────────────────────────────
     ("copy_prefix", "def copy_prefix(lst: list[int], n: int):\n    assert len(lst)>=n;assert n>=0\n    result=lst[0:n]\n    assert len(result)==n\n    return result"),
+
+    # ── list comprehension ────────────────────────────────────────
+    ("squares", "def squares(n: int):\n    assert n>=0\n    result=[i*i for i in range(n)]\n    assert len(result)==n\n    return result"),
 ]
 
 

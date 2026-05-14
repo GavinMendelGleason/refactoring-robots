@@ -61,10 +61,10 @@ class ImpTranslator:
                 commands.append(cmd)
         if not commands:
             return "CSkip"
-        # Strip trailing duplicate CAss to "result" (from explicit + return)
-        while len(commands) >= 2 and commands[-1].startswith('(CAss "result"') and commands[-2].startswith('(CAss "result"'):
+        # Strip trailing identity CAss "result" → (AVar "result") — always redundant
+        while commands and 'CAss "result"%string (AVar "result"%string)' in commands[-1]:
             commands = commands[:-1]
-        if len(commands) == 1:
+        if not commands:
             return commands[0]
         result = commands[-1]
         for cmd in reversed(commands[:-1]):
@@ -236,6 +236,8 @@ class ImpTranslator:
                 targets.append(f'(CAss "{target}"%string (ABool {val}))')
             elif isinstance(value, ast.Subscript) and isinstance(value.slice, ast.Slice):
                 return self._translate_slice_copy(target, value)
+            elif isinstance(value, ast.ListComp):
+                return self._translate_list_comp(target, value)
             else:
                 val = self.translate_expr(value)
                 targets.append(f'(CAss "{target}"%string {val})')
@@ -303,6 +305,77 @@ class ImpTranslator:
         return f'(CAss "{target}"%string ({op_str} (AVar "{target}"%string) {val}))'
 
     def _translate_slice_copy(self, target: str, node: ast.Subscript) -> str:
+        """Translate target = lst[start:end] → while-loop copy."""
+        tname = self._translate_target(node.value)
+        tstart = self.translate_expr(node.slice.lower) if node.slice.lower else "(ANum 0)"
+        tend = self.translate_expr(node.slice.upper) if node.slice.upper else f'(ALen "{tname}"%string)'
+        loop_var = "_k"
+        init_list = f'(CListNew "{target}"%string)'
+        init = f'(CAss "{loop_var}"%string {tstart})'
+        cond = f"(BLe (APlus (AVar \"{loop_var}\"%string) (ANum 1)) {tend})"
+        append = f'(CListAppend \"{target}\"%string (AIndex \"{tname}\"%string (AVar \"{loop_var}\"%string)))'
+        incr = f'(CAss \"{loop_var}\"%string (APlus (AVar \"{loop_var}\"%string) (ANum 1)))'
+        loop_body = f"(CSeq {append} {incr})"
+        loop = f"(CWhile {cond} (fun _ => True) {loop_body})"
+        return f"(CSeq {init_list} (CSeq {init} {loop}))"
+
+    def _translate_list_comp(self, target: str, node: ast.ListComp) -> str:
+        """Translate list comprehension: [f(x) for x in lst if p(x)]."""
+        if len(node.generators) != 1:
+            return f"(* untranslated list comprehension: {ast.unparse(node)} *)"
+        gen = node.generators[0]
+        loop_var = self._translate_target(gen.target)
+        init_list = f'(CListNew "{target}"%string)'
+
+        # Build body: if p(x): CListAppend target f(x)
+        elt_coq = self.translate_expr(node.elt)
+        body = f'(CListAppend "{target}"%string {elt_coq})'
+        for cond_expr in reversed(gen.ifs):
+            cond = self._truthify(cond_expr)
+            body = f'(CIf {cond} {body} CSkip)'
+
+        # Build the for-loop
+        if isinstance(gen.iter, ast.Name):
+            for_loop = self._build_for_in_name_with_body(loop_var, gen.iter.id, body)
+            return f"(CSeq {init_list} {for_loop})"
+        if isinstance(gen.iter, ast.Call):
+            # range(n) — expand inline as while loop
+            range_loop = self._translate_for_range(loop_var, gen.iter, body)
+            if range_loop:
+                return f"(CSeq {init_list} {range_loop})"
+        return f"(* untranslated list comprehension: {ast.unparse(node)} *)"
+
+    def _translate_for_range(self, target: str, node: ast.Call, body: str) -> str | None:
+        """Translate for i in range(...): body → while loop. Returns None if not range."""
+        if not (isinstance(node.func, ast.Name) and node.func.id == "range"):
+            return None
+        args = node.args
+        if len(args) == 1:
+            start = "(ANum 0)"; limit = self.translate_expr(args[0]); step = "(ANum 1)"
+        elif len(args) == 2:
+            start = self.translate_expr(args[0]); limit = self.translate_expr(args[1]); step = "(ANum 1)"
+        else:
+            return None
+        loop_var = "_k"
+        init = f'(CAss "{target}"%string {start})'
+        cond = f"(BLe (APlus (AVar \"{target}\"%string) {step}) {limit})"
+        incr = f'(CAss "{target}"%string (APlus (AVar \"{target}\"%string) {step}))'
+        loop_body = f"(CSeq {body} {incr})"
+        loop = f"(CWhile {cond} (fun _ => True) {loop_body})"
+        return f"(CSeq {init} {loop})"
+
+    def _build_for_in_name_with_body(self, target: str, iter_name: str, body: str) -> str:
+        """Build for-in loop with a pre-built body string."""
+        start_val = "(ANum 0)"
+        step_val = "(ANum 1)"
+        loop_var = "_i"
+        init = f'(CAss "{loop_var}"%string {start_val})'
+        cond = f"(BLe (APlus (AVar \"{loop_var}\"%string) {step_val}) (ALen \"{iter_name}\"%string))"
+        elem_load = f'(CAss "{target}"%string (AIndex \"{iter_name}\"%string (AVar \"{loop_var}\"%string)))'
+        incr = f'(CAss "{loop_var}"%string (APlus (AVar \"{loop_var}\"%string) {step_val}))'
+        loop_body = f"(CSeq {elem_load} (CSeq {body} {incr}))"
+        loop = f"(CWhile {cond} (fun _ => True) {loop_body})"
+        return f"(CSeq {init} {loop})"
         """Translate target = lst[start:end] → while-loop copy."""
         tname = self._translate_target(node.value)
         tstart = self.translate_expr(node.slice.lower) if node.slice.lower else "(ANum 0)"
