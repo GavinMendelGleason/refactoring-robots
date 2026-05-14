@@ -221,7 +221,6 @@ class ImpTranslator:
         if not name or name not in self._contract_map:
             return None
         callee_params, pre_coq, post_coq = self._contract_map[name]
-        args_str = " ".join(self.translate_expr(a) for a in node.args)
         args_list = "(" + " :: ".join(self.translate_expr(a) for a in node.args) + " :: nil)" if node.args else "nil"
         # Bind caller args to callee param slots in the state
         bindings = []
@@ -229,11 +228,10 @@ class ImpTranslator:
             arg_coq = self.translate_expr(arg)
             if i < len(callee_params):
                 bindings.append(f'(CAss "{callee_params[i]}"%string {arg_coq})')
-        # State-scope the precondition (callee's bare params → state lookups)
-        for p in callee_params:
-            pre_coq = pre_coq.replace(f'({p} ', f'(s "{p}"%string ')
-            pre_coq = pre_coq.replace(f' {p} ', f' s "{p}"%string ')
-            pre_coq = pre_coq.replace(f' {p})', f' s "{p}"%string)')
+        # State-scope the precondition: bare callee params → state lookups
+        pre_coq = self._scope_callee_params(pre_coq, callee_params)
+        # In postcondition: callee's result → caller's target variable
+        post_coq = self._subst_result(post_coq, target, callee_params)
         pre_str = f"(fun s => {pre_coq})"
         post_str = f"(fun s => {post_coq})"
         call = f'(CCall "{name}"%string {args_list} {pre_str} {post_str} "{target}"%string)'
@@ -241,6 +239,30 @@ class ImpTranslator:
         for b in reversed(bindings):
             result = f"(CSeq {b} {result})"
         return result
+
+    @staticmethod
+    def _scope_callee_params(coq_expr: str, params: list[str]) -> str:
+        """Replace bare callee param names with state lookups (capture-safe)."""
+        import re
+        result = coq_expr
+        for p in params:
+            # Replace `p` as a standalone word with `s "p"%string`
+            result = re.sub(
+                rf'(?<![a-zA-Z0-9_"%]){re.escape(p)}(?![a-zA-Z0-9_"%])',
+                f's "{p}"%string', result
+            )
+        return result
+
+    @staticmethod
+    def _subst_result(post_coq: str, target: str, callee_params: list[str]) -> str:
+        """Substitute callee's result with caller's target variable.
+        
+        s "result"%string → s "target"%string.
+        Only applies when 'result' is not a callee parameter (avoid shadow).
+        """
+        if 'result' in callee_params:
+            return post_coq  # don't substitute if callee has a 'result' param
+        return post_coq.replace('s "result"%string', f's "{target}"%string')
 
     def _translate_augassign(self, stmt: ast.AugAssign) -> str:
         """Translate augmented assignment: i += 1 → CAss i (APlus i 1)."""

@@ -335,20 +335,21 @@ def prompt_system() -> str:
     return """You are a Coq proof assistant. Output ONLY the proof (Proof. ... Qed.).
 Use 'wp_prove.' as the FIRST tactic — it handles all WP/state simplification.
 After wp_prove, the goal is a simple Z arithmetic statement or conjunction.
-Then use: lia, split, intro, reflexivity, apply.
+Then use: lia, split, intro, reflexivity, apply, intros.
 Keep proofs short. Most are 1-3 lines after wp_prove.
 
 Patterns:
 - Simple assignment: Proof. intros. wp_prove. Qed.
 - Conditional (single BLe): Proof. intros. wp_reduce. split; [ intro H; apply Z.leb_le in H | intro H; apply Z.leb_gt in H ]; wp_prove; split; lia. Qed.
-- Conditional with BOr (x < lo || x > hi): Proof. intros. wp_reduce. split; intro H.
+- Conditional with BOr: Proof. intros. wp_reduce. split; intro H.
   - apply Bool.orb_true_iff in H. destruct H as [Hc|Hc]; apply Z.leb_le in Hc; wp_prove; split; lia.
   - apply Bool.orb_false_iff in H. destruct H as [Hc1 Hc2]; apply Z.leb_gt in Hc1; apply Z.leb_gt in Hc2; wp_prove; split; lia. Qed.
+- Function call (CCall): After wp_reduce, you'll see a goal like (forall r : Z, ...). Use:
+    match goal with [H: forall r:Z, ?P -> ?Q |- ?Q] => eapply H; [solve [auto] | reflexivity] end.
 - VCG: Proof. intros Hinv Hexit. apply Z.leb_gt in Hexit. lia. Qed.
 
-Available tactics: wp_prove, wp_reduce, lia, split, intro, intros, apply, reflexivity, destruct.
-Key lemmas: Z.leb_le, Z.leb_gt, Bool.orb_true_iff, Bool.orb_false_iff, Bool.andb_true_iff, Bool.andb_false_iff.
-Boolean operators in goals use || and && from Coq's Bool module — use Bool.*_iff lemmas to destruct them into Prop hypotheses before applying Z.leb_le/Z.leb_gt."""
+Available tactics: wp_prove, wp_reduce, lia, split, intro, intros, apply, reflexivity, destruct, eapply, match.
+Key lemmas: Z.leb_le, Z.leb_gt, Bool.orb_true_iff, Bool.orb_false_iff."""
 
 
 def prompt_user(

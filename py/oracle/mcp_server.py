@@ -364,6 +364,9 @@ def _try_llm_oracle(source: str, func_name: str, goal: GoalStatus) -> GoalStatus
         f"Use wp_prove as the FIRST tactic. Then: lia, reflexivity, split, intro, apply.\n"
         f"Keep it short. Most proofs are 1-2 lines after wp_prove.\n"
     )
+    # Pass hint through to oracle for thinking-time control
+    if hint and hint != "hammer":
+        llm_hint += f"\n\nTake your time thinking. {hint}\n"
 
     print(f"  [oracle] Attempting LLM proof for {func_name}...", file=_sys.stderr)
     result = oracle_query(
@@ -936,6 +939,7 @@ Qed.
 
     has_bor = "BOr" in imp_body
     has_cif = "CIf" in imp_body
+    has_call = "CCall" in imp_body
 
     # Don't use conditional proof if there's a while loop — CWhile's
     # (fun _ => True) makes the WP trivial; conditional is handled inside.
@@ -960,6 +964,11 @@ Qed.
             proof = "  intros.\n  wp_reduce.\n  split; [ intro Hle; apply Z.leb_le in Hle | intro Hgt; apply Z.leb_gt in Hgt ];\n  wp_prove; split; lia."
     else:
         proof = "  intros.\n  wp_prove."
+
+    if has_call:
+        # CCall introduces forall r — apply after wp_reduce
+        proof = "  intros.\n  wp_reduce.\n  repeat (match goal with [H: forall _:Z, ?P -> ?Q |- ?Q] => eapply H; [assumption | simpl; reflexivity] end)."
+        proof += "\n  try lia."
 
     bool_import = "Require Import Bool.\n" if has_bor else ""
 
