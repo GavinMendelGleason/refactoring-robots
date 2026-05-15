@@ -228,6 +228,18 @@ def first2(lst: list[int]):
     ("iso_date", "def iso_date(text: str):\n    assert len(text)>=0\n    if len(text)!=10:return 1\n    if text[4]!=45 or text[7]!=45:return 1\n    i=0\n    while i<10:\n        assert i<=10\n        if i!=4 and i!=7:\n            if text[i]<48 or text[i]>57:return 1\n        i+=1\n    return 0"),
     ("unique_items", "def unique_items(items: list[int]):\n    assert len(items)>=0\n    i=0\n    while i<len(items):\n        assert i<=len(items)\n        j=i+1\n        while j<len(items):\n            assert j<=len(items)\n            if items[i]==items[j]:return 1\n            j+=1\n        i+=1\n    return 0"),
 
+    # ── String methods ─────────────────────────────────────────────
+    ("check_lower", '''def check_lower(text: str, n: int):
+    assert n>=0
+    text.lower()
+    i=0
+    while i<n:
+        assert i<=n
+        c=text[i]
+        if c<97 or c>122: return 1
+        i+=1
+    return 0'''),
+
     # ── Negative tests ─────────────────────────────────────────────
     ("weak_count", "def weak_count(n: int):\n    assert n>=0\n    count=0;i=0\n    while i<n:\n        assert count>=0;assert i<=n\n        count+=1;i+=1\n    assert count==n\n    return count"),
     ("missing_bound", "def missing_bound(n: int):\n    assert n>=0\n    total=0;i=0\n    while i<n:\n        assert total>=0\n        total+=i;i+=1\n    assert total==n*(n-1)//2\n    return total"),
