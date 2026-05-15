@@ -126,6 +126,18 @@ class ImpTranslator:
                 if obj:
                     val = self.translate_expr(value.args[0])
                     return f'(CDictSet "{obj}"%string {val} (ANum 1))'
+            if name and name.endswith(".lower") and not value.args:
+                obj = self._get_call_object(value)
+                if obj:
+                    loop_var = "_k"
+                    init = f'(CAss "{loop_var}"%string (ANum 0))'
+                    cond = f"(BLe (APlus (AVar \"{loop_var}\"%string) (ANum 1)) (ALen \"{obj}\"%string))"
+                    char = f'(AIndex "{obj}"%string (AVar "{loop_var}"%string))'
+                    is_upper = f'(BAnd (BLe (ANum 65) {char}) (BLe {char} (ANum 90)))'
+                    lowered = f'(APlus {char} (ANum 32))'
+                    body = f'(CSeq (CIf {is_upper} (CListSet "{obj}"%string (AVar "{loop_var}"%string) {lowered}) CSkip) (CAss "{loop_var}"%string (APlus (AVar "{loop_var}"%string) (ANum 1))))'
+                    loop = f'(CWhile {cond} (fun _ => True) {body})'
+                    return f'(CSeq {init} {loop})'
         return None
 
     def translate_expr(self, node: ast.expr) -> str:
