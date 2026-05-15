@@ -76,10 +76,12 @@ class ContractLinter(ast.NodeVisitor):
     The IR can then emit both Coq and SMT-LIB output.
     """
 
-    def __init__(self, params: list[str] | None = None, context: str = "postcondition"):
+    def __init__(self, params: list[str] | None = None, context: str = "postcondition",
+                 predicates: dict | None = None):
         self.violations: list[LintViolation] = []
         self.params = params or []
         self.context = context
+        self.predicates: dict = predicates or {}  # name → (param_names, return_expr)
 
     def lint_expression(self, node: ast.expr) -> LintResult:
         """Convert a Python expression to IR. Returns LintResult with coq/smt."""
@@ -164,10 +166,40 @@ class ContractLinter(ast.NodeVisitor):
                           f"Function call cannot be resolved")
             return None
         if name not in PURE_BUILTINS and name not in PURE_MODULE_FUNCTIONS:
+            if name in self.predicates:
+                return self._expand_predicate(node, name)
             self._violation(node, ExprKind.IMPURE_CALL,
                           f"Function '{name}' not in pure whitelist")
             return None
         return self._translate_pure_call(node, name)
+
+    def _expand_predicate(self, node: ast.Call, name: str) -> Optional[Expr]:
+        """Expand a call to a user-defined pure predicate by inlining its body."""
+        import ast as ast_module
+        param_names, body_expr = self.predicates[name]
+        if len(node.args) != len(param_names):
+            self._violation(node, ExprKind.IMPURE_CALL,
+                          f"Predicate '{name}' expects {len(param_names)} args, got {len(node.args)}")
+            return None
+        if body_expr is None:
+            self._violation(node, ExprKind.IMPURE_CALL,
+                          f"Predicate '{name}' contains loops or recursion. "
+                          f"Express the property directly instead, e.g. "
+                          f"all(result[i] <= result[i+1] for i in range(len(result)-1))")
+            return None
+        class _Subst(ast_module.NodeTransformer):
+            def __init__(self, mapping):
+                self.mapping = mapping
+            def visit_Name(self, n):
+                if n.id in self.mapping:
+                    return self.mapping[n.id]
+                return n
+        mapping = {p: a for p, a in zip(param_names, node.args)}
+        expanded = _Subst(mapping).visit(ast_module.fix_missing_locations(
+            ast_module.Module(body=[ast_module.Expr(value=body_expr)], type_ignores=[])
+        ))
+        inner_expr = expanded.body[0].value
+        return self.visit(inner_expr)
 
     def visit_Constant(self, node: ast.Constant) -> Expr:
         if isinstance(node.value, bool):
@@ -310,7 +342,7 @@ class ContractLinter(ast.NodeVisitor):
         return IntLit(value=0)
 
     def _translate_quantifier(self, node: ast.Call, name: str) -> Optional[Expr]:
-        """Translate all(p(x) for x in lst) or any(...) to AllExpr/AnyExpr."""
+        """Translate all(p(x) for x in lst) or all(p(x) for x in range(lo, hi))."""
         if node.args and isinstance(node.args[0], ast.GeneratorExp):
             gen = node.args[0]
             if gen.generators and len(gen.generators) == 1:
@@ -323,6 +355,23 @@ class ContractLinter(ast.NodeVisitor):
                         if name == "all":
                             return AllExpr(var=var, lst=lst, pred=pred)
                         return AnyExpr(var=var, lst=lst, pred=pred)
+                if isinstance(comp.target, ast.Name) and isinstance(comp.iter, ast.Call):
+                    if isinstance(comp.iter.func, ast.Name) and comp.iter.func.id == "range":
+                        var = comp.target.id
+                        args = comp.iter.args
+                        if len(args) == 1:
+                            lower = IntLit(value=0)
+                            upper = self.visit(args[0])
+                        elif len(args) == 2:
+                            lower = self.visit(args[0])
+                            upper = self.visit(args[1])
+                        else:
+                            return BoolLit(value=True)
+                        pred = self.visit(gen.elt)
+                        if pred and lower and upper:
+                            if name == "all":
+                                return AllExpr(var=var, lower=lower, upper=upper, pred=pred)
+                            return AnyExpr(var=var, lower=lower, upper=upper, pred=pred)
         return BoolLit(value=True)
 
 

@@ -141,32 +141,44 @@ class DictCountExpr(BaseModel):
 
 
 class AllExpr(BaseModel):
-    """all(p(x) for x in lst) — universal quantifier over list."""
+    """all(p(x) for x in lst) or all(p(x) for x in range(lo, hi))."""
     kind: Literal["all"] = "all"
     var: str
-    lst: str
+    lst: str = ""
     pred: "Expr"
-
-    def to_coq(self, scoped: bool = False) -> str:
-        return "True"  # quantifiers not in Coq VCG — handled by SMT
-
-    def to_smt(self) -> str:
-        p = self.pred.to_smt()
-        return f"(forall (({self.var} Int)) (=> (and (<= 0 {self.var}) (< {self.var} {self.lst}__len)) {p}))"
-
-
-class AnyExpr(BaseModel):
-    """any(p(x) for x in lst) — existential quantifier over list."""
-    kind: Literal["any"] = "any"
-    var: str
-    lst: str
-    pred: "Expr"
+    lower: Optional["Expr"] = None
+    upper: Optional["Expr"] = None
 
     def to_coq(self, scoped: bool = False) -> str:
         return "True"
 
     def to_smt(self) -> str:
         p = self.pred.to_smt()
+        if self.lower is not None and self.upper is not None:
+            lo = self.lower.to_smt()
+            hi = self.upper.to_smt()
+            return f"(forall (({self.var} Int)) (=> (and (<= {lo} {self.var}) (< {self.var} {hi})) {p}))"
+        return f"(forall (({self.var} Int)) (=> (and (<= 0 {self.var}) (< {self.var} {self.lst}__len)) {p}))"
+
+
+class AnyExpr(BaseModel):
+    """any(p(x) for x in lst) or any(p(x) for x in range(lo, hi))."""
+    kind: Literal["any"] = "any"
+    var: str
+    lst: str = ""
+    pred: "Expr"
+    lower: Optional["Expr"] = None
+    upper: Optional["Expr"] = None
+
+    def to_coq(self, scoped: bool = False) -> str:
+        return "True"
+
+    def to_smt(self) -> str:
+        p = self.pred.to_smt()
+        if self.lower is not None and self.upper is not None:
+            lo = self.lower.to_smt()
+            hi = self.upper.to_smt()
+            return f"(exists (({self.var} Int)) (and (and (<= {lo} {self.var}) (< {self.var} {hi})) {p}))"
         return f"(exists (({self.var} Int)) (and (and (<= 0 {self.var}) (< {self.var} {self.lst}__len)) {p}))"
 
 

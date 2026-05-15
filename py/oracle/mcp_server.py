@@ -224,9 +224,11 @@ def _verify_function(source: str, func_name: str, hint: str | None = None) -> Go
                           suggested_action=Action.REFACTOR,
                           suggestion_text=old_err)
 
+    predicates = _collect_predicates(tree)
+
     # Lint with expanded params (so result, account.balance are scoped correctly)
-    linter_pre = ContractLinter(expanded, "precondition")
-    linter_post = ContractLinter(expanded, "postcondition")
+    linter_pre = ContractLinter(expanded, "precondition", predicates=predicates)
+    linter_post = ContractLinter(expanded, "postcondition", predicates=predicates)
     lint_results: list[AssertInfo] = []
     for stmt in ast.walk(func_node):
         if isinstance(stmt, ast.Assert):
@@ -594,6 +596,40 @@ def _check_old_captures(func_node, params: list[str]) -> str:
                             f"capture (line {captured[n.id]}) and must only "
                             f"appear in `assert` statements")
     return ""
+
+
+
+def _collect_predicates(tree) -> dict[str, tuple[list[str], "ast.expr | None"]]:
+    """Find user-defined predicate functions in a file.
+
+    Returns dict of name → (param_names, return_expression).
+    return_expression is None for multi-statement/looping predicates.
+    """
+    import ast
+    predicates: dict[str, tuple[list[str], ast.expr | None]] = {}
+    for node in ast.iter_child_nodes(tree):
+        if not isinstance(node, ast.FunctionDef):
+            continue
+        params = [p.arg for p in node.args.args]
+        param_set = set(params)
+        def _mutates(n):
+            if isinstance(n, ast.Assign):
+                for t in n.targets:
+                    if isinstance(t, ast.Name) and (t.id == "result" or t.id in param_set):
+                        return True
+            if isinstance(n, ast.AugAssign):
+                if isinstance(n.target, ast.Name) and (n.target.id == "result" or n.target.id in param_set):
+                    return True
+            return False
+        if any(_mutates(n) for n in ast.walk(node)):
+            continue
+        non_doc = [s for s in node.body
+                   if not (isinstance(s, ast.Expr) and isinstance(s.value, ast.Constant))]
+        if len(non_doc) == 1 and isinstance(non_doc[0], ast.Return) and non_doc[0].value:
+            predicates[node.name] = (params, non_doc[0].value)
+        else:
+            predicates[node.name] = (params, None)
+    return predicates
 
 
 def _build_contract_map(tree) -> dict[str, tuple[list[str], str, str]]:
@@ -1036,8 +1072,15 @@ def _try_smt_vcg_ir(inv_irs: list, exit_cond: str, post_irs: list, scaffold: str
         all_vars_coq += " " + scaffold_stripped
     vars_set = _extract_vars(all_vars_coq)
 
+    has_quantifier = any(
+        getattr(e, "kind", "") in ("all", "any")
+        for e in (inv_irs + post_irs)
+    )
+    if has_quantifier:
+        vars_set |= _extract_vars(inv_smt, post_smt, scaff_smt or "")
+
     lines = [
-        "(set-logic QF_NIA)",
+        f"(set-logic {'NIA' if has_quantifier else 'QF_NIA'})",
         "(set-option :produce-models true)",
     ]
     for v in sorted(vars_set):
